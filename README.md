@@ -53,12 +53,17 @@ Panel 4 needs its own sequence: the overlay route.
 ArkOS runs Panels 2 to 4 at 77.38 Hz (29 MHz over 732 × 512). The community
 DTB pack for `R36S-V21 2024-12-18 2552` boards brings Panel 4 to 59.94 Hz with
 the same 29 MHz clock and a longer vertical front porch. `panel_overlay.py`
-does the same: it keeps the ArkOS pixel clock and stretches the blanking. It
-gives three modes:
+keeps the ArkOS mode as the default, unchanged, and adds two more. Like
+ROCKNIX's own `importpanel.py`, it only lengthens the blanking or raises the
+clock for them, never shortens anything the panel was driven with:
 
-- 60.00 Hz, the default;
-- 59.73 Hz, the Game Boy's own rate;
-- the ArkOS mode unchanged, as a fallback.
+- the ArkOS mode, the default;
+- 60.00 Hz;
+- 59.73 Hz, the Game Boy's own rate.
+
+A first version made 60 Hz the default by shortening the vertical front porch
+(165 to 135 lines on a 59.94 Hz Panel 4); the screen stayed black on the first
+try, though that boot was also cut short, so the cause is not proven.
 
 ## Making the overlay
 
@@ -97,10 +102,17 @@ microSD card**, and the ArkOS card is never touched.
    ROCKNIX's SSH, or in its terminal: `cat /sys/class/drm/card*-DSI-1/modes`
    lists the modes, and `dmesg | grep -i dsi` shows what the driver did.
 
-If the screen stays black, try `M ... default=1` on the ArkOS mode instead:
-remove `default=1` from the 60 Hz line in the `.dtso`, add it to the last `M`
-line, and rebuild the overlay with `dtc -I dts -O dtb -o mipi-panel.dtbo
-mipi-panel.dtso` (`brew install dtc` on macOS).
+The first boot installs the system and reboots on its own, several times on
+some RK3326 clones (ROCKNIX's EE-clone notes give about 5 minutes). Leave it
+alone for at least 5 minutes before deciding the screen is black, and don't
+cut the power while it is writing.
+
+If the screen stays black, ROCKNIX can make the overlay itself: copy the ArkOS
+DTB to the console over SSH and run `/usr/libexec/generic-dsi/importpanel.py
+rk3326-r35s-linux.dtb -O dtbo -o /flash/overlays/mipi-panel.dtbo` (after
+`mount -o remount,rw /flash`). ROCKNIX also points to ready-made R36S panel
+overlays (`mipi-panel.dtbo.r36s-panel*`) from
+[stolen/r.nix-distribution](https://github.com/stolen/r.nix-distribution/releases/tag/panel_overlays).
 
 ## Next steps
 

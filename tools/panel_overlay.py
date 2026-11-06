@@ -12,7 +12,9 @@ DSI_PANEL = "dsi@ff450000/panel@0"
 ARKOS_NAMES = ["rk3326-r35s-linux.dtb", "rk3326-r36s-linux.dtb", "rk3326-rg351mp-linux.dtb", "rg351mp-kernel.dtb"]
 FORMATS = ["rgb888", "rgb666", "rgb666_packed", "rgb565"]
 CLOCK_NON_CONTINUOUS = 0x400
-TARGETS = [(60.0, True), (59.7275, False)]
+# Extra modes next to the ArkOS one, which stays the default. Like ROCKNIX's
+# importpanel.py, they only ever lengthen the blanking or raise the clock.
+TARGETS = [60.0, 59.7275]
 KNOWN_PANELS = {
     "4962c6341fcf": "Panel 0 (original)",
     "cc3ecb6ee691": "Panel 1",
@@ -164,8 +166,7 @@ def best_totals(clocks, htotal, vmin, vtotal, target, vstretch):
 
 def fit_mode(clock, hor, ver, target):
     htotal, vtotal = sum(hor), sum(ver)
-    vmin = vtotal - ver[1] + min(ver[1], 16)
-    best = best_totals([clock], htotal, vmin, vtotal, target, 1.35)
+    best = best_totals([clock], htotal, vtotal, vtotal, target, 1.35)
     if best is None or best[0][0] > 0.01:
         perfect = target * htotal * vtotal / 1000
         start = math.ceil(perfect / 10) * 10
@@ -197,14 +198,13 @@ def description(panel, name):
         f"format={fmt} lanes={panel.u32('dsi,lanes', 4)} flags=0x{flags:x}"
     ]
     clock, hor, ver = native_mode(panel)
-    modes = []
-    for target, default in TARGETS:
-        fitted = fit_mode(clock, hor, ver, target)
-        if fitted:
-            c, h, v, fps = fitted
-            modes.append((c, h, v, fps, default))
     original_fps = clock * 1000 / (sum(hor) * sum(ver))
-    modes.append((clock, hor, ver, original_fps, not any(m[4] for m in modes)))
+    modes = [(clock, hor, ver, original_fps, True)]
+    for target in TARGETS:
+        fitted = fit_mode(clock, hor, ver, target)
+        if fitted and abs(fitted[3] - original_fps) > 0.01:
+            c, h, v, fps = fitted
+            modes.append((c, h, v, fps, False))
     for c, h, v, fps, default in modes:
         tail = " default=1" if default else ""
         lines.append(f"M clock={c} horizontal={','.join(map(str, h))} vertical={','.join(map(str, v))}{tail}")
