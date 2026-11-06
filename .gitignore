@@ -1,0 +1,6 @@
+*.dtbo
+*.dtso
+*.img
+*.img.gz
+__pycache__/
+.DS_Store
