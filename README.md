@@ -418,7 +418,8 @@ Together about 415 ms (156 + 140 + 120) out of boot-16's 1.44 s.
 **Booted on the console on 11 November** (`boot-17`): `init` started at
 1.02 s (1.44 s in `boot-16`, 1.97 s in `boot-15`). `hardware.txt` shows
 the G line with `delays=20,10,20,0,20`, DSI-1 connected and on at
-640x480, and is otherwise the same as `boot-16`'s; the dmesg has no new
+640x480 (and on the screen the picture looked normal, no lines or
+flicker), and is otherwise the same as `boot-16`'s; the dmesg has no new
 messages and no `jent_mod_init`. The panel's probe took 418 ms instead of
 684 ms. What is left of it: 270 ms of waits the panel asks for (20 ms after
 power, 10 ms reset, 20 ms after it, 200 ms after sleep out, 20 ms after
