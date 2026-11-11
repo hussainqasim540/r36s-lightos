@@ -1,0 +1,6 @@
+L
+R36S LightOS boot flag, read by boot.ini. With "L" as the first letter,
+the next power-on boots LightOS (lightos/initrd.img). U-Boot changes the
+letter to "R" before starting it, so the power-on after that is ROCKNIX
+again. Set it with tools/lightos_once.sh from the computer, or with
+"LightOS boot once" in ROCKNIX's Ports.

@@ -14,6 +14,10 @@ on the `G` line; that version of `panel-generic-dsi` stops at the first
 parameter it doesn't know (`unknown param name` in dmesg), so it never read
 `lanes=4` and drove the panel on 1 lane, with a black screen. `name=` now goes
 last. `sdcard/` adds boot logs on the FAT partition, to work without a UART.
+LightOS stage 1, a busybox initramfs on ROCKNIX's kernel that boots once from
+the same card when `LIGHTOS.TXT` says so, is on the card and passes the U-Boot
+sandbox test, but has not been tried on the console yet
+(see [Booting LightOS once](#booting-lightos-once-next-to-rocknix)).
 
 ## Back up the ArkOS card first
 
@@ -198,13 +202,57 @@ To go back: copy `lightos/boot.ini.before` over `boot.ini`, and delete
 `mount-storage.sh` and `lightos/`. The service left in `/storage` does nothing
 once `lightos/diag.sh` is gone.
 
+## Booting LightOS once, next to ROCKNIX
+
+LightOS stage 1 is ROCKNIX's kernel with our own userland: a static busybox
+initramfs (`initramfs/init`, built into `lightos/initrd.img`) that the kernel
+unpacks over ROCKNIX's built-in initramfs, started with
+`rdinit=/lightos/init`. Everything it needs is built into that kernel, not
+in modules: vfat, configfs, the mass-storage gadget, the USB role switch,
+evdev and the R36S joypad (`odroidgo3-joypad`). It
+
+1. shows each button as it is pressed, for 15 s, with its key code;
+2. writes `os.txt`, `init.txt`, `dmesg.txt` and `hardware.txt` (panel, DRM
+   modes, input devices, cpufreq, devfreq, temperatures, battery) to
+   `lightos/logs/boot-N`, with the same counter as ROCKNIX's boots;
+3. shares the FAT partition over the OTG port, like **LightOS SD via USB**,
+   for 2 minutes;
+4. reboots when the computer ejects it, or when no computer came.
+
+**The one-shot.** `boot.ini` boots LightOS only when `LIGHTOS.TXT`, in the
+root of the FAT partition, starts with `L`. U-Boot first changes that letter
+to `R` with `fatwrite` and boots LightOS only if the write worked, so the
+power-on after that is ROCKNIX whatever LightOS does: a kernel that hangs
+needs a power cycle, not the card taken out. `panic=10` reboots by itself if
+`init` dies. The file is in the root because this U-Boot's 2017 `fatwrite`
+can't write in a subdirectory, and its name is upper-case 8.3, so it needs no
+long-name entry.
+
+To arm it:
+
+- from the computer, with the card mounted (reader, or over USB from ROCKNIX
+  or from LightOS itself): `tools/lightos_once.sh /Volumes/ROCKNIX`, then
+  eject: the console reboots into LightOS;
+- on the console: **LightOS boot once** in ROCKNIX's Ports.
+
+A working loop, with no card taken out: change `initramfs/init`, run
+`tools/build_initramfs.sh` (Docker, e.g. colima) and `tools/install_card.sh`
+on the card shared by LightOS, then `tools/lightos_once.sh`, and eject.
+
+`tools/test_boot_ini.sh /Volumes/ROCKNIX` runs `sdcard/boot.ini` in a
+mainline U-Boot sandbox against a FAT32 image laid out like the card (the
+card's R36S tree and overlay, so `fdt apply` runs on the real files): no
+flag, `L`, the power-on after, `L` without `initrd.img`, another letter.
+It checks what `booti` gets and that the file system is clean after the
+write. The sandbox's `fatwrite` is newer than the console's, so after the
+first real LightOS boot check the card's file system too
+(`diskutil verifyVolume /Volumes/ROCKNIX`).
+
 ## Next steps
 
-1. Boot a LightOS kernel and busybox initramfs from the same card, next to
-   ROCKNIX, and fall back to ROCKNIX on the next power-on so a broken kernel
-   never needs the card taken out (the R36S OTG port works in device mode:
-   macOS saw **LightOS SD via USB** as a `File-Stor Gadget`, reading at about
-   28 MB/s).
+1. Our own kernel next to ROCKNIX's, through the same one-shot: mainline
+   with ROCKNIX's RK3326 patches, its R36S device tree and
+   `panel-generic-dsi`, only the drivers the R36S uses, built in.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and

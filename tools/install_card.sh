@@ -26,6 +26,12 @@ mkdir -p "$card/lightos"
 cp -X "$here/boot.ini" "$card/boot.ini"
 cp -X "$here/mount-storage.sh" "$card/mount-storage.sh"
 cp -X "$here/lightos/"* "$card/lightos/"
+initrd=$here/../out/initrd.img
+if [ -f "$initrd" ]; then
+  cp -X "$initrd" "$card/lightos/initrd.img"
+else
+  echo "No out/initrd.img (tools/build_initramfs.sh): LightOS can't boot from this card yet" >&2
+fi
 
 # macOS leaves ._ files on FAT; U-Boot and ROCKNIX don't need them.
 dot_clean -m "$card" 2>/dev/null || true

@@ -1,0 +1,219 @@
+#!/lightos/bin/sh
+# R36S LightOS, stage 1: the first program of a LightOS boot (rdinit=).
+#
+# For now it runs on ROCKNIX's kernel: U-Boot passes lightos/initrd.img,
+# which the kernel unpacks over ROCKNIX's built-in initramfs, and this script
+# replaces ROCKNIX's /init. It
+#   1. shows the buttons as they are pressed, for KEY_SECONDS;
+#   2. writes what it found to lightos/logs/boot-N on the FAT partition,
+#      with the same counter as ROCKNIX's boots (mount-storage.sh);
+#   3. shares that partition over the OTG port, like "LightOS SD via USB";
+#   4. reboots when the computer ejects it, or when no computer came.
+# U-Boot already set LIGHTOS.TXT back to "R", so the reboot goes to ROCKNIX
+# unless the computer set it to "L" again.
+#
+# If this script stops, the kernel panics and panic=10 reboots.
+
+export PATH=/lightos/bin
+KEY_SECONDS=15
+WAIT_HOST=120
+WAIT_GONE=20
+LOG=/tmp/lightos-init.txt
+G=/sys/kernel/config/usb_gadget/lightos
+
+mkdir -p /proc /sys /dev /tmp /flash
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
+mount -t configfs configfs /sys/kernel/config 2>/dev/null
+
+up() { cut -d' ' -f1 /proc/uptime; }
+say() { echo "$*"; echo "$(up) $*" >> $LOG; }
+t_init=$(up)
+
+printf '\033[2J\033[H'
+say "R36S LightOS (busybox initramfs, $(uname -r))"
+say "init started at ${t_init} s"
+
+# 1. Buttons. One reader per input device; an evdev read returns whole
+# 24-byte events: time (16), type, code (u16), value (s32).
+say ""
+say "Press buttons: each one shows here (${KEY_SECONDS} s)."
+readers=
+for ev in /dev/input/event*; do
+  [ -c "$ev" ] || continue
+  name=$(cat /sys/class/input/${ev##*/}/device/name 2>/dev/null)
+  say "  ${ev##*/}: $name"
+  (
+    while :; do
+      set -- $(dd if=$ev bs=24 count=1 2>/dev/null | od -An -tu2)
+      [ $# -ge 11 ] || exit 0
+      # EV_KEY (1), pressed (1)
+      [ "$9" = 1 ] && [ "${11}" = 1 ] && say "  key ${10} on $name"
+    done
+  ) &
+  readers="$readers $!"
+done
+sleep $KEY_SECONDS
+kill $readers 2>/dev/null
+killall dd 2>/dev/null
+
+# 2. Logs on the FAT partition.
+part=
+i=0
+while [ $i -lt 50 ]; do
+  part=$(findfs LABEL=ROCKNIX 2>/dev/null) && [ -b "$part" ] && break
+  part=
+  usleep 100000
+  i=$((i + 1))
+done
+say ""
+if [ -z "$part" ]; then
+  say "No FAT partition labelled ROCKNIX: no logs, no USB disk."
+  sleep 10
+  reboot -f
+fi
+
+hardware() {
+  echo "== uptime"; cat /proc/uptime
+  echo "== uname"; uname -a
+  echo "== cmdline"; cat /proc/cmdline
+  echo "== LIGHTOS.TXT (U-Boot should have made it R)"
+  head -c 1 /flash/LIGHTOS.TXT 2>/dev/null; echo
+  echo "== panel node"
+  panel=/proc/device-tree/dsi@ff450000/panel@0
+  tr '\0' ' ' < $panel/compatible; echo
+  [ -e $panel/panel_description ] && echo "panel_description present: the overlay was applied"
+  for c in /sys/class/drm/card*-*; do
+    [ -d "$c" ] || continue
+    echo "== $c"
+    echo "status=$(cat $c/status) enabled=$(cat $c/enabled) dpms=$(cat $c/dpms)"
+    cat $c/modes
+  done
+  for b in /sys/class/backlight/*; do
+    [ -d "$b" ] || continue
+    echo "== $b"
+    for f in brightness actual_brightness max_brightness bl_power; do
+      echo "$f=$(cat $b/$f)"
+    done
+  done
+  echo "== input"; cat /proc/bus/input/devices
+  echo "== cpufreq"
+  for f in scaling_governor scaling_cur_freq scaling_available_frequencies \
+           scaling_available_governors; do
+    echo "$f=$(cat /sys/devices/system/cpu/cpu0/cpufreq/$f 2>/dev/null)"
+  done
+  echo "== devfreq"
+  for d in /sys/class/devfreq/*; do
+    [ -d "$d" ] && echo "${d##*/} cur=$(cat $d/cur_freq) available=$(cat $d/available_frequencies)"
+  done
+  echo "== thermal"
+  for z in /sys/class/thermal/thermal_zone*; do
+    [ -d "$z" ] && echo "${z##*/} $(cat $z/type)=$(cat $z/temp)"
+  done
+  echo "== power supply"
+  for p in /sys/class/power_supply/*; do
+    [ -d "$p" ] && echo "-- ${p##*/}" && cat $p/uevent
+  done
+  echo "== memory"; cat /proc/meminfo
+  echo "== mounts"; cat /proc/mounts
+  echo "== block"; cat /proc/partitions
+  echo "== usb device controller"; ls /sys/class/udc
+}
+
+if mount -t vfat -o rw,noatime "$part" /flash; then
+  logs=/flash/lightos/logs
+  mkdir -p $logs
+  count=$(cat $logs/count 2>/dev/null)
+  count=$(( ${count:-0} + 1 ))
+  echo $count > $logs/count
+  for old in $logs/boot-*; do
+    [ -d "$old" ] && [ "${old##*-}" -le $(( count - 5 )) ] && rm -rf "$old"
+  done
+  dir=$logs/boot-$count
+  mkdir -p $dir
+  say "Logs: lightos/logs/boot-$count"
+  echo "LightOS stage 1 (busybox initramfs on ROCKNIX's kernel)" > $dir/os.txt
+  hardware > $dir/hardware.txt 2>&1
+  dmesg > $dir/dmesg.txt
+  cp $LOG $dir/init.txt
+  sync
+  umount /flash
+else
+  say "Could not mount $part: no logs."
+fi
+
+# 3. The partition over the OTG port.
+UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n1)
+if [ -z "$UDC" ] || [ ! -d /sys/kernel/config/usb_gadget ]; then
+  say "No USB device controller or configfs: no USB disk."
+  sleep 10
+  reboot -f
+fi
+
+role() {
+  for sw in /sys/class/udc/$UDC/device/usb_role/*/role; do
+    [ -w "$sw" ] && echo "$1" > "$sw"
+  done
+}
+
+mkdir -p $G/strings/0x409 $G/configs/c.1/strings/0x409 $G/functions/mass_storage.0
+echo 0x1d6b > $G/idVendor
+echo 0x0104 > $G/idProduct
+echo 0x0200 > $G/bcdUSB
+echo "R36S LightOS" > $G/strings/0x409/manufacturer
+echo "R36S SD (LightOS)" > $G/strings/0x409/product
+echo "mass storage" > $G/configs/c.1/strings/0x409/configuration
+echo 250 > $G/configs/c.1/MaxPower
+lun=$G/functions/mass_storage.0/lun.0
+echo 1 > $lun/removable
+echo 0 > $lun/ro
+echo 0 > $lun/cdrom
+echo "$part" > $lun/file
+ln -s $G/functions/mass_storage.0 $G/configs/c.1/
+
+role device
+if ! echo "$UDC" > $G/UDC; then
+  say "Could not start the USB disk on $UDC."
+  sleep 10
+  reboot -f
+fi
+say ""
+say "SD card on the OTG port: plug in the computer"
+say "within ${WAIT_HOST} s, eject it when done."
+
+waited=0
+seen=no
+gone=0
+while :; do
+  state=$(cat /sys/class/udc/$UDC/state 2>/dev/null)
+  file=$(cat $lun/file 2>/dev/null)
+  if [ "$state" = configured ]; then
+    [ $seen = no ] && say "Computer connected."
+    seen=yes
+    gone=0
+  elif [ $seen = yes ]; then
+    gone=$((gone + 1))
+  fi
+  if [ $seen = yes ] && [ -z "$file" ]; then
+    say "Ejected by the computer."
+    break
+  fi
+  if [ $seen = yes ] && [ $gone -ge $WAIT_GONE ]; then
+    say "Cable gone for ${WAIT_GONE} s."
+    break
+  fi
+  if [ $seen = no ] && [ $waited -ge $WAIT_HOST ]; then
+    say "No computer after ${WAIT_HOST} s."
+    break
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+
+echo "" > $G/UDC 2>/dev/null
+role host
+say "Rebooting."
+sync
+sleep 2
+reboot -f

@@ -50,6 +50,7 @@ snapshot() {
 }
 
 chmod 755 "/storage/roms/ports/LightOS SD via USB.sh" 2>/dev/null
+chmod 755 "/storage/roms/ports/LightOS boot once.sh" 2>/dev/null
 snapshot 0s
 sleep 20;  snapshot 20s
 sleep 40;  snapshot 60s
