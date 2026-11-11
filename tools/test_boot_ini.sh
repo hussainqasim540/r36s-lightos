@@ -106,7 +106,7 @@ others() { dd if=mmc1.img bs=512 skip=2048 2>/dev/null | dd bs=512 count=31 2>/d
            dd if=mmc1.img bs=512 skip=$((2048 + 32)) 2>/dev/null | md5sum | cut -c1-8; }
 rocknix="RESULT 0x02000000 - 0x01f00000"
 lightos="RESULT 0x02000000 0x04000000 0x01f00000"
-largs="ARGS rdinit=/lightos/init quiet panic=10 console=ttyS2,115200 console=tty0"
+largs="ARGS rdinit=/lightos/init quiet panic=10 initcall_debug log_buf_len=1M console=ttyS2,115200 console=tty0"
 rargs() { echo "$ARGS" | grep -q "^ARGS boot=LABEL=ROCKNIX" && echo rocknix || echo "$ARGS"; }
 
 echo "no LIGHTOS.TXT"

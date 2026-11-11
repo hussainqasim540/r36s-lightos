@@ -2,11 +2,13 @@
 # Builds the LightOS kernel in Docker (colima works; arm64 hosts build it
 # natively): Linux 6.12.17 with ROCKNIX 20250517's RK3326 patches, its
 # panel-generic-dsi driver and its RK3326 config, the kernel that drives the
-# R36S panel on the ROCKNIX card. Two changes from ROCKNIX's build: no
-# built-in initramfs (LightOS passes lightos/initrd.img) and the version
-# suffix "-lightos" (and the hostname, a placeholder ROCKNIX fills in). It
-# builds with gcc 14.2 (Debian trixie), the version ROCKNIX used. No modules
-# are built: what LightOS uses is built in.
+# R36S panel on the ROCKNIX card, with kernel/lightos.config merged on top:
+# no built-in initramfs (LightOS passes lightos/initrd.img), the version
+# suffix "-lightos", and without what the R36S does not have (other boards'
+# panels and joypads, HDMI, USB host, Btrfs and its raid6 benchmark). The
+# build fails if a line of that fragment does not hold in the final config.
+# It builds with gcc 14.2 (Debian trixie), the version ROCKNIX used. No
+# modules are built: what LightOS uses is built in.
 #
 # Output in out/kernel/: Image, rk3326-gameconsole-r36s.dtb, config and
 # build.txt (sources, patches, hashes). The kernel tree and object files are
@@ -19,7 +21,8 @@ set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$here/out/kernel"
 
-docker run --rm -v lightos-kernel:/w -v "$here/out/kernel:/o" debian:trixie bash -euc '
+docker run --rm -v lightos-kernel:/w -v "$here/out/kernel:/o" \
+  -v "$here/kernel:/k:ro" debian:trixie bash -euc '
 LINUX_VERSION=6.12.17
 LINUX_SHA256=5c205cd34f80974e4973e321cb008f5f6895a8aa8c2577f06a9448cd77de63b3   # kernel.org sha256sums.asc
 ROCKNIX_COMMIT=fec842b58559ee973a0100abd726370e4a032b77   # tag 20250517
@@ -68,10 +71,20 @@ fi
 
 cd $src
 cp $R/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf .config
-scripts/config --set-str INITRAMFS_SOURCE "" --set-str LOCALVERSION "-lightos" \
-  --set-str DEFAULT_HOSTNAME "lightos" \
-  --disable LOCALVERSION_AUTO
+scripts/kconfig/merge_config.sh -m -Q .config /k/lightos.config > /w/merge.log 2>&1
 make -s olddefconfig
+# Every line of the fragment must hold: an option set there can be turned
+# back on by a select, or off by a missing dependency.
+bad=0
+while read -r line; do
+  case $line in
+    CONFIG_*=*) grep -qxF "$line" .config || { echo "not as in lightos.config: $line -> $(grep "^${line%%=*}=" .config || echo "not set")" >&2; bad=1; } ;;
+    "# CONFIG_"*" is not set")
+      o=${line#\# }; o=${o%% *}
+      if grep -q "^$o=" .config; then echo "not as in lightos.config: $line -> $(grep "^$o=" .config)" >&2; bad=1; fi ;;
+  esac
+done < /k/lightos.config
+[ $bad = 0 ] || exit 1
 # -@ keeps __symbols__ in the tree, as ROCKNIX does: fdt apply needs it for
 # the panel overlay.
 if ! make -j$(nproc) DTC_FLAGS=-@ Image rockchip/rk3326-gameconsole-r36s.dtb > /w/make.log 2>&1; then
@@ -91,6 +104,8 @@ cp .config /o/config
   echo "patches:"
   for p in $patches; do echo "  ${p#$R/}"; done
   echo "  + packages/kernel/drivers/generic-dsi/sources/panel-generic-dsi.c (obj-y)"
+  echo "config: linux.aarch64.conf + kernel/lightos.config (sha256 $(sha256sum /k/lightos.config | cut -c1-16))"
+  echo "built in: $(grep -c "=y$" .config) options, Image $(stat -c %s /o/Image) bytes"
   echo "Image sha256: $(sha256sum /o/Image | cut -d" " -f1)"
   echo "dtb sha256:   $(sha256sum /o/rk3326-gameconsole-r36s.dtb | cut -d" " -f1)"
 } > /o/build.txt

@@ -342,10 +342,38 @@ shows in ours and is the first thing to cut for boot time.
 The guided button test now runs only with a file `lightos/keytest` on the
 card; without it, buttons show on the screen for 10 s.
 
+### Slimming it down
+
+`kernel/lightos.config` is merged on top of ROCKNIX's config, and the build
+fails if any of its lines does not hold in the final `.config`. It turns
+off what the R36S does not have and lists what LightOS needs built in, so a
+change that drops one of those fails the build instead of the boot. Only
+built-in code matters: `=m` options are never built.
+
+Where `boot-15`'s 1.96 s before `init` went (dmesg timestamps):
+
+| What | Time | |
+|---|---|---|
+| `raid6` benchmark (Btrfs selects `RAID6_PQ`) and `xor` | 520 ms | cut |
+| panel power-on and init sequence (the overlay's `delays=20,150,20,120,20`, then `11 wait=c8`, `29 wait=14`) | about 680 ms, `[drm] Initialized` to `Console: switching` | the panel's timings, later |
+| SD card SDR104 tuning | 400 ms, in parallel with the panel | hardware |
+| dwc2 reset | 123 ms | hardware |
+| 0.75 s to 0.88 s, after the initramfs is unpacked | 131 ms | unknown: `initcall_debug` will say |
+
+First round, cut: Btrfs (and with it `raid6`/`xor`), NFS, ISO 9660, FUSE,
+overlayfs, IPv6, the other handhelds' joypads, `adc-keys` and panels, the
+HDMI/DP/LVDS/RGB outputs, the EHCI/OHCI host (disabled in the R36S device
+tree), USB storage/HID/ACM, the network gadget functions, VFIO and EDAC.
+The `Image` goes from 19.8 MB to 16.3 MB, 94 fewer built-in options, and
+the device tree is unchanged. LightOS's boot arguments now carry
+`initcall_debug log_buf_len=1M`, so `dmesg.txt` gives the time of each
+initcall for the next round.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
-   a faster boot (the `raid6` benchmark first), then a newer mainline.
+   a faster boot (first round done, see "Slimming it down": next, what
+   `initcall_debug` shows and the panel's delays), then a newer mainline.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
