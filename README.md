@@ -369,11 +369,29 @@ the device tree is unchanged. LightOS's boot arguments now carry
 `initcall_debug log_buf_len=1M`, so `dmesg.txt` gives the time of each
 initcall for the next round.
 
+**Booted on the console on 11 November** (`boot-16`): `init` started at
+1.44 s instead of 1.97 s. `hardware.txt` is the same as `boot-15`'s
+(panel, DRM, input devices, USB disk, cpufreq) apart from the boot
+arguments, the token and 1.3 MB less `MemTotal` (the 1 MB log buffer); the
+buttons and the USB disk worked, and the dmesg has no messages that
+`boot-15` did not have. The slowest initcalls (`initcall_debug`):
+
+| Initcall | Time | What it is |
+|---|---|---|
+| `deferred_probe_initcall` | 712 ms | DRM bind and the panel's power-on and init sequence, `0.72 s` to `Console: switching` at `1.38 s` |
+| `jent_mod_init` | 156 ms | the jitter entropy RNG's start-up test: the unknown gap of `boot-15` |
+| `dwc2_platform_driver_init` | 128 ms | the OTG controller's reset |
+| `rk3x_i2c_driver_init` | 61 ms | the PMIC and its regulators |
+| `of_platform_default_populate_init` | 43 ms | creating the device tree's devices |
+
+The SD card's tuning (done at 0.92 s) now ends before the panel does.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
-   a faster boot (first round done, see "Slimming it down": next, what
-   `initcall_debug` shows and the panel's delays), then a newer mainline.
+   a faster boot (first round done, 1.97 s to 1.44 s, see "Slimming it
+   down": next, the jitter entropy RNG and the panel's delays), then a
+   newer mainline.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
