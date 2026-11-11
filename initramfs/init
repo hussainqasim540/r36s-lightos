@@ -115,7 +115,13 @@ if [ $stage = 2 ] && command -v kmscube >/dev/null; then
     echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20
     echo "== kmscube"; } >> $GPU 2>&1
   t0=$(up)
-  kmscube -c 600 >> $GPU 2>&1 &
+  # kmscube stops at the first input on its stdin ("user interrupted!",
+  # boot-29 after 4.4 s, on the console): its stdin is a FIFO opened read
+  # and write, which never has anything to read. (Not a pipe from sleep:
+  # ash's wait would then wait for the sleep too.) Mesa's shader cache goes
+  # to /tmp (the root is read-only).
+  mkfifo /tmp/kmscube.in
+  XDG_CACHE_HOME=/tmp/cache kmscube -c 600 <> /tmp/kmscube.in >> $GPU 2>&1 &
   k=$!
   i=0
   while kill -0 $k 2>/dev/null && [ $i -lt 200 ]; do
