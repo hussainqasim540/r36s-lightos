@@ -464,13 +464,25 @@ What changed for LightOS:
   devfreq (its node is disabled in the R36S tree), some netfilter. The
   `Image` is 17.8 MB (16.3 MB on 6.12).
 
+**Booted on the console on 11 November** (`boot-18`): `os.txt` says
+`LightOS kernel 7.1.2-lightos`, `init` started at 1.00 s (1.02 s on
+6.12, `boot-17`). `hardware.txt` matches `boot-17` apart from the version
+(now `SMP PREEMPT`) and the joypad: `r36s_Gamepad` now comes from
+`rocknix-singleadc-joypad`, with the same key bitmap as before and force
+feedback (the driver found the rumble motor). Panel, DRM, cpufreq,
+devfreq, power supplies and the USB disk are the same. The dmesg has no
+errors or warnings. The panel's probe still takes 419 ms; dwc2's reset
+(125 ms) now runs in the deferred probe after it, so the total before
+`init` is the same. No button was pressed, so the key codes on 7.1 are
+not checked yet.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
    a faster boot (first round done, 1.97 s to 1.44 s, see "Slimming it
    down"; second round, the jitter entropy RNG and the panel's delays,
-   1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, built, to be tried
-   on the console.
+   1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, booted (the
+   guided button test on it is still to do).
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
