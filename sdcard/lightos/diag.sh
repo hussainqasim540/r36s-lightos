@@ -7,7 +7,6 @@
 logs=/flash/lightos/logs
 dir=$logs/boot-$(cat $logs/count 2>/dev/null)
 tmp=/tmp/lightos-diag
-mkdir -p $tmp
 
 hardware() {
   echo "== uptime"; cat /proc/uptime
@@ -30,11 +29,14 @@ hardware() {
   done
   echo "== usb device controller"; ls /sys/class/udc
   echo "== failed units"; systemctl --failed --no-pager
-  echo "== ui"; systemctl status emustation weston --no-pager
+  echo "== ui"; systemctl status essway sway emustation --no-pager; echo "== ports"; ls -la /storage/roms/ports
   echo "== modules"; lsmod
 }
 
 snapshot() {
+  mkdir -p $tmp
+  # Also the log of the last "LightOS SD via USB" run, before this boot.
+  [ -f $tmp/usb-disk.txt ] || cp /storage/.cache/lightos-usb-disk.log $tmp/usb-disk.txt 2>/dev/null
   dmesg > $tmp/dmesg.txt 2>&1
   journalctl -b --no-pager > $tmp/journal.txt 2>&1
   hardware > $tmp/hardware.txt 2>&1
@@ -47,6 +49,7 @@ snapshot() {
   mount -o remount,ro /flash
 }
 
+chmod 755 "/storage/roms/ports/LightOS SD via USB.sh" 2>/dev/null
 snapshot 0s
 sleep 20;  snapshot 20s
 sleep 40;  snapshot 60s

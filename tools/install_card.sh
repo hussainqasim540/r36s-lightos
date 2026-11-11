@@ -25,7 +25,7 @@ mkdir -p "$card/lightos"
 
 cp -X "$here/boot.ini" "$card/boot.ini"
 cp -X "$here/mount-storage.sh" "$card/mount-storage.sh"
-cp -X "$here/lightos/diag.sh" "$here/lightos/lightos-diag.service" "$card/lightos/"
+cp -X "$here/lightos/"* "$card/lightos/"
 
 # macOS leaves ._ files on FAT; U-Boot and ROCKNIX don't need them.
 dot_clean -m "$card" 2>/dev/null || true

@@ -151,6 +151,29 @@ A first `boot.ini` that started `ums` on Vol- never showed a disk on the
 computer, and no boot that day reached `/storage`. A USB path has to come
 from Linux instead (ROCKNIX's dwc2 gadget), once the system is known to boot.
 
+**The SD card over USB, from Linux.** The hook also puts **LightOS SD via
+USB** in ROCKNIX's Ports. It writes it to
+`/storage/games-internal/roms/ports`: with a single card, `rocknix-automount`
+runs `mount --bind /storage/games-internal/roms /storage/roms` after the
+initramfs (its log line leaves out `/roms`), and a file in the real
+`/storage/roms` ends up hidden. Start it, then plug the console's OTG port (not the
+charging port) into the computer within 2 minutes. `usb-disk.sh` stops the
+log service, keeps `/flash` read-only, switches the dwc2 to device mode with
+the same `usb_role` switch as ROCKNIX's `usbgadget`, and shares the partition
+under `/flash` through a configfs mass-storage gadget. The `ROCKNIX` volume
+mounts on the computer: change `boot.ini`, the overlays or `lightos/`, read
+`lightos/logs/`, then eject it. On eject, or 20 s after the cable is pulled,
+the console reboots and uses the new files. With no computer after 2
+minutes it gives the port back to host mode and returns to the menu. Each run
+is logged to `/storage/.cache/lightos-usb-disk.log`, copied to `usb-disk.txt`
+in the next boot's log folder. Replacing `KERNEL` or `SYSTEM` this way works
+only for the next boot: the running system reads `SYSTEM` from that partition,
+and may crash before the reboot.
+
+This needs Linux to get as far as the menu. When a change stops it from
+booting, the card has to come out once: copy `lightos/boot.ini.before` (or
+the last working files) back.
+
 **Did it boot?** Without a UART, the STORAGE superblock tells: its mount count
 and last mount time (offsets `0x34` and `0x2C` of the superblock, 1024 bytes
 into the partition) only change when the initramfs gets as far as mounting
@@ -177,9 +200,11 @@ once `lightos/diag.sh` is gone.
 
 ## Next steps
 
-1. The FAT partition over USB from Linux: the 20250517 kernel has the dwc2
-   in dual-role mode and `CONFIG_USB_CONFIGFS_MASS_STORAGE`, so a configfs
-   gadget can hand `mmcblk1p1` to the computer.
+1. Boot a LightOS kernel and busybox initramfs from the same card, next to
+   ROCKNIX, and fall back to ROCKNIX on the next power-on so a broken kernel
+   never needs the card taken out (the R36S OTG port works in device mode:
+   macOS saw **LightOS SD via USB** as a `File-Stor Gadget`, reading at about
+   28 MB/s).
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and

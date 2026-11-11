@@ -1,6 +1,8 @@
 [Unit]
 Description=R36S LightOS boot logs on the FAT partition
 DefaultDependencies=no
+# /tmp is still on the read-only SYSTEM squashfs until local-fs.target.
+After=local-fs.target
 ConditionPathExists=/flash/lightos/diag.sh
 
 [Service]
