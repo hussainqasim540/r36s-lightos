@@ -226,17 +226,30 @@ evdev and the R36S joypad (`odroidgo3-joypad`). It
 4. reboots when the computer ejects it, or when no computer came.
 
 The first boot, on 11 November, reached `init` 1.98 s after the kernel
-started. The `r36s_Gamepad` sent these key codes (evdev names):
+started. The R36S buttons, from the guided test of `boot-14` (11 November,
+every button asked for and pressed once, then the same codes again in the
+free part):
 
-| Codes | evdev |
-|---|---|
-| 544, 545, 546, 547 | `BTN_DPAD_UP`, `DOWN`, `LEFT`, `RIGHT` |
-| 304, 305, 307, 308 | `BTN_SOUTH`, `EAST`, `NORTH`, `WEST` |
-| 310, 311, 312, 313 | `BTN_TL`, `TR`, `TL2`, `TR2` |
-| 314, 315, 316, 317 | `BTN_SELECT`, `START`, `MODE`, `THUMBL` |
+| Button | Code | evdev | Device |
+|---|---|---|---|
+| D-pad up, down, left, right | 544, 545, 546, 547 | `BTN_DPAD_UP`, `DOWN`, `LEFT`, `RIGHT` | `r36s_Gamepad` |
+| A | 305 | `BTN_EAST` | `r36s_Gamepad` |
+| B | 304 | `BTN_SOUTH` | `r36s_Gamepad` |
+| X | 307 | `BTN_NORTH` | `r36s_Gamepad` |
+| Y | 308 | `BTN_WEST` | `r36s_Gamepad` |
+| L1, R1 | 310, 311 | `BTN_TL`, `BTN_TR` | `r36s_Gamepad` |
+| L2, R2 | 312, 313 | `BTN_TL2`, `BTN_TR2` | `r36s_Gamepad` |
+| SELECT, START | 314, 315 | `BTN_SELECT`, `BTN_START` | `r36s_Gamepad` |
+| FN | 316 | `BTN_MODE` | `r36s_Gamepad` |
+| Left stick, right stick (pressed) | 317, 318 | `BTN_THUMBL`, `BTN_THUMBR` | `r36s_Gamepad` |
+| Volume +, volume - | 115, 114 | `KEY_VOLUMEUP`, `KEY_VOLUMEDOWN` | `gpio-keys-vol` |
+| POWER | 116 | `KEY_POWER` | `rk805 pwrkey` |
 
-`BTN_THUMBR` (318) did not show up. Which physical button sends which code
-was not written down during that test: that mapping is still to do.
+The face buttons follow the Nintendo layout: A is on the right
+(`BTN_EAST`) and B at the bottom (`BTN_SOUTH`). RESET sends nothing: it
+resets the SoC. LightOS writes `keys.txt` only when the 2 minutes are over,
+so a RESET during the test loses it (that is what happened to the first
+try, which left no `boot-N` folder of its own).
 
 **The one-shot.** `boot.ini` boots LightOS only when `LIGHTOS.TXT`, in the
 root of the FAT partition, starts with `L`, a token that is new each time it
