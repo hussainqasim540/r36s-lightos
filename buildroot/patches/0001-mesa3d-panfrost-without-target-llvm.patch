@@ -1,0 +1,71 @@
+Panfrost without LLVM, OpenCL and SPIR-V on the target.
+
+Mesa's panfrost driver needs its CL kernels precompiled: host-mesa3d
+builds mesa_clc and panfrost_compile with host LLVM/clang/libclc, and the
+target build uses them (-Dmesa-clc=system -Dprecomp-compiler=system).
+Buildroot 2026.02 also ties panfrost to target LLVM and OpenCL (rusticl,
+clang, libclc) and to target SPIR-V tools, which the GL driver does not
+use. LightOS only needs GLES/EGL/GBM: keep the host side, drop the target
+side.
+
+Without OpenCL nothing selects BR2_PACKAGE_LLVM_RTTI, so host-llvm is
+built without RTTI and host-mesa3d's meson stops ("LLVM was built without
+RTTI, so Mesa must also disable RTTI"): set its cpp_rtti from that option,
+as mesa3d.mk already does for the target.
+
+diff -ru a/package/mesa3d/Config.in b/package/mesa3d/Config.in
+--- a/package/mesa3d/Config.in	2026-11-11 21:25:39
++++ b/package/mesa3d/Config.in	2026-11-11 21:25:23
+@@ -23,9 +23,6 @@
+ 
+ config BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+ 	bool
+-	select BR2_PACKAGE_MESA3D_OPENCL
+-	select BR2_PACKAGE_SPIRV_LLVM_TRANSLATOR
+-	select BR2_PACKAGE_SPIRV_TOOLS
+ 
+ config BR2_PACKAGE_MESA3D_LLVM
+ 	bool "llvm support"
+@@ -203,15 +200,11 @@
+ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+ 	bool "Gallium panfrost driver"
+ 	depends on BR2_TOOLCHAIN_HAS_SYNC_4 || !BR2_PACKAGE_XORG7 # libxshmfence
+-	depends on BR2_PACKAGE_MESA3D_LLVM
+ 	select BR2_PACKAGE_MESA3D_GALLIUM_DRIVER
+ 	select BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+ 	select BR2_PACKAGE_MESA3D_RUSTICL_SUPPORTED_DRIVER
+ 	help
+ 	  Mesa driver for ARM Mali Midgard and Bifrost GPUs.
+-
+-comment "panfrost driver needs llvm"
+-	depends on !BR2_PACKAGE_MESA3D_LLVM
+ 
+ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_R300
+ 	bool "Gallium Radeon R300 driver"
+diff -ru a/package/mesa3d/mesa3d.mk b/package/mesa3d/mesa3d.mk
+--- a/package/mesa3d/mesa3d.mk	2026-11-11 21:25:39
++++ b/package/mesa3d/mesa3d.mk	2026-11-11 21:25:23
+@@ -154,7 +154,7 @@
+ 
+ ifeq ($(BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER),y)
+ MESA3D_CONF_OPTS += -Dmesa-clc=system -Dprecomp-compiler=system
+-MESA3D_DEPENDENCIES += host-mesa3d spirv-llvm-translator spirv-tools
++MESA3D_DEPENDENCIES += host-mesa3d
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_MESA3D_VULKAN_DRIVER),)
+@@ -309,6 +309,14 @@
+ 	-Dprecomp-compiler=enabled \
+ 	-Dglx=disabled \
+ 	-Dvulkan-drivers=""
++
++# host-llvm has RTTI only with BR2_PACKAGE_LLVM_RTTI, which OpenCL selects;
++# Mesa has to be built the same way.
++ifeq ($(BR2_PACKAGE_LLVM_RTTI),y)
++HOST_MESA3D_CONF_OPTS += -Dcpp_rtti=true
++else
++HOST_MESA3D_CONF_OPTS += -Dcpp_rtti=false
++endif
+ 
+ HOST_MESA3D_DEPENDENCIES = \
+ 	host-libclc \

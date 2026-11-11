@@ -1,0 +1,41 @@
+# R36S LightOS root file system (Buildroot 2026.02.3, tools/build_rootfs.sh).
+# The kernel and the bootloader are not built here: tools/build_kernel.sh
+# builds the kernel, and the card's U-Boot boots it.
+
+# RK3326: four Cortex-A35.
+BR2_aarch64=y
+BR2_cortex_a35=y
+
+# glibc, as slot's binaries expect; C++ for Mesa. Headers no newer than
+# the LightOS kernel (7.1).
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_KERNEL_HEADERS_6_18=y
+
+BR2_TARGET_GENERIC_HOSTNAME="lightos"
+BR2_TARGET_GENERIC_ISSUE="R36S LightOS"
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+# The stage 1 tree (static busybox, /lightos/init) goes into /lightos.
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_LIGHTOS_PATH)/board/r36s/post-build.sh"
+
+# GLES through Panfrost (Mali-G31), on KMS/GBM: what slot opens.
+# buildroot/patches/0001 drops the target LLVM/OpenCL Buildroot ties to it.
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+BR2_PACKAGE_MESA3D_GBM=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_KMSCUBE=y
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_LIBDRM_INSTALL_TESTS=y
+
+# Sound (rk817 codec).
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
+
+# A squashfs image: stage 1 copies it to RAM and switches to it.
+BR2_TARGET_ROOTFS_SQUASHFS=y
+BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
+# BR2_TARGET_ROOTFS_TAR is not set

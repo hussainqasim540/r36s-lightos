@@ -479,6 +479,72 @@ The guided button test on 7.1 (`boot-19`): all 20 buttons were pressed and
 each sent the same key code from the same device as on 6.12 (the table
 above, from `boot-14`), POWER included.
 
+## The root file system
+
+Stage 2 is a Buildroot root file system (`buildroot/`, an external tree
+for Buildroot 2026.02.3 LTS), on the card as `lightos/rootfs.sqfs`. The
+card's U-Boot and boot.ini stay as they are. Stage 1, the busybox
+initramfs, does the hand-over:
+
+1. it copies `lightos/rootfs.sqfs` from the FAT partition to RAM (the card
+   then stays free for the logs and the USB disk, as in stage 1);
+2. it loop-mounts the copy read-only, mounts a tmpfs on its `/tmp` and
+   moves `/dev`, `/proc` and `/sys` into it;
+3. it runs `switch_root` to `/lightos/init` there. That is the same
+   script and the same static busybox (Buildroot's post-build copies
+   `out/stage1.tar` in). It finds the `/lightos/stage2` marker and goes
+   on as stage 2.
+
+If the file is missing, can't be copied or doesn't mount, stage 1 goes on
+by itself, as before. busybox's `switch_root` refuses to run without a
+regular file `/init` in the initramfs (a check before it empties it). Ours
+starts from `rdinit=/lightos/init`, so init creates an empty `/init`
+first. `tools/test_init_stages.sh` runs init as PID 1 in Docker against a
+FAT image labelled ROCKNIX, in three cases (no rootfs, a good one, a
+damaged one); its first run found the `/init` check.
+
+Stage 2 adds one step before the button test: `kmscube` for 600 frames
+(10 s at 60 Hz) on the panel, through Mesa's Panfrost. Its output (the EGL
+and GL renderer) goes to `gpu.txt` in the boot's logs, with the DRM
+connectors from `modetest`.
+
+The defconfig (`configs/lightos_r36s_defconfig`): Buildroot's own
+toolchain (glibc, C++, for slot), Cortex-A35, kernel headers 6.18, Mesa
+26.0.1 with Panfrost (GBM, EGL, GLES), kmscube, libdrm with its tests
+(`modetest`), ALSA's `amixer`, `aplay` and `speaker-test`, and a zstd
+squashfs. The LightOS kernel builds Panfrost in (`kernel/lightos.config`).
+
+Buildroot's Panfrost depends on target LLVM, which pulls in OpenCL and
+SPIR-V. Mesa 26 needs those only to precompile Panfrost's internal shaders
+(`panfrost_compile`, with `mesa_clc`), and those tools run on the build
+machine, in host-mesa3d with host LLVM. The patch
+`buildroot/patches/0001-mesa3d-panfrost-without-target-llvm.patch`
+removes the target dependencies, so the root file system has no LLVM.
+
+`tools/build_rootfs.sh` builds it in Docker (in the volume
+`lightos-buildroot`, incremental after the first run). Order:
+`build_initramfs.sh` (it writes `out/stage1.tar`), then `build_rootfs.sh`,
+then `install_card.sh`.
+
+The first build (11 November) took about 2 h 20 min on colima's VM (4
+CPUs, 6 GiB), most of it host LLVM and clang. Two things stopped it on
+the way:
+
+- **Out of memory in host-llvm.** Buildroot runs CPUs + 1 jobs, and a
+  cc1plus using 1.4 GB was killed. `build_rootfs.sh` now starts one job
+  per 1.8 GB of free memory (2 or 3 here).
+- **RTTI.** Without OpenCL nothing selects `BR2_PACKAGE_LLVM_RTTI`, so
+  host LLVM has no RTTI, and host-mesa3d's meson refused to go on. The
+  patch sets host-mesa3d's `cpp_rtti` from that option, as Buildroot
+  already does for the target's Mesa.
+
+After the first build, a change to init or to the defconfig's packages
+costs minutes. The result: `rootfs.sqfs` is 9.3 MB (33 MB unpacked): glibc
+2.42, gcc 14.3's libstdc++, Mesa's `libgallium` (19 MB, Panfrost only),
+EGL, GLESv2, GBM, kmscube, modetest and ALSA. It has no LLVM. In
+`test_init_stages.sh` this root file system reaches stage 2, and kmscube
+starts and exits on finding no DRM device (Docker has no GPU).
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
@@ -486,12 +552,12 @@ above, from `boot-14`), POWER included.
    down"; second round, the jitter entropy RNG and the panel's delays,
    1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, booted, all
    buttons checked.
-2. A Buildroot tree (`buildroot/`) that builds:
-   - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
-   - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
-     `panel-generic-dsi`;
-   - Mesa with Panfrost for slot's GLES;
-   - busybox, ALSA, slot and the GB/GBC/GBA cores.
+2. A Buildroot root file system (`buildroot/`, see "The root file
+   system"): Mesa with Panfrost and kmscube first; then ALSA, eudev
+   (slot links libudev), slot and the GB/GBC/GBA cores. The kernel stays
+   `tools/build_kernel.sh`'s. Mainline U-Boot with the Rockchip TPL/BL31
+   from `rkbin` comes later, on a card of its own, since the bench card
+   keeps ROCKNIX's bootloader.
 3. Boot into slot from init in a few seconds, with clocks and the cpufreq
    governor managed by slot.
 4. Overclocking: extra OPPs for CPU, GPU and DDR in the device tree, tested one

@@ -62,7 +62,12 @@ run() {  # run CASE
       check $1 "/ is the squashfs" $b/hardware.txt "^/dev/loop[0-9]* / squashfs ro"
       check $1 "/tmp is a tmpfs" $b/hardware.txt "^tmpfs /tmp tmpfs"
       check $1 "logs on the FAT (rw)" $b/hardware.txt " /flash vfat rw"
-      check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
+      check $1 "reached the USB step" console-$1.txt "No USB device controller"
+      if [ -f /src/out/rootfs/rootfs.sqfs ]; then
+        # No GPU in Docker: kmscube has to start and fail on the DRM device.
+        echo "    gpu.txt, last lines:"; tail -n 4 $b/gpu.txt | sed "s/^/      /"
+        check $1 "gpu.txt: kmscube ran and exited" $b/gpu.txt "^== exit"
+      fi ;;
     *)
       check $1 "os.txt says stage 1" $b/os.txt "^LightOS stage 1"
       check $1 "/ is the initramfs" $b/hardware.txt "^tmpfs / tmpfs"
