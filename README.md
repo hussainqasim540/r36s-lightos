@@ -14,11 +14,9 @@ on the `G` line; that version of `panel-generic-dsi` stops at the first
 parameter it doesn't know (`unknown param name` in dmesg), so it never read
 `lanes=4` and drove the panel on 1 lane, with a black screen. `name=` now goes
 last. `sdcard/` adds boot logs on the FAT partition, to work without a UART.
-LightOS stage 1, a busybox initramfs on ROCKNIX's kernel, boots from the same
-card when `LIGHTOS.TXT` says so (see
-[Booting LightOS once](#booting-lightos-once-next-to-rocknix)); the one-shot
-that brings the console back to ROCKNIX on the next power-on is on its second
-version, not yet tried on the console.
+LightOS stage 1, a busybox initramfs on ROCKNIX's kernel, boots once from the
+same card when `LIGHTOS.TXT` is armed, and the next power-on is ROCKNIX again
+(see [Booting LightOS once](#booting-lightos-once-next-to-rocknix)).
 
 ## Back up the ArkOS card first
 
@@ -245,6 +243,13 @@ write worked. So the power-on after that is ROCKNIX whatever LightOS does: a
 kernel that hangs needs a power cycle, not the card taken out. It only
 writes over a sector that is empty or starts with `L`. `panic=10` reboots by
 itself if `init` dies.
+
+Tried on the console on 11 November: armed from **LightOS boot once**,
+LightOS booted (`boot-10`: its command line, and the same token in
+`LIGHTOS.TXT` and in sector 31), `fsck_msdos` found the partition clean with
+a single `LIGHTOS.TXT`, and after the eject the console came back on
+ROCKNIX's menu. The logs of that ROCKNIX boot (`boot-11`) have not been read
+yet.
 
 The first version had U-Boot rewrite the `L` in `LIGHTOS.TXT` with
 `fatwrite`, and the console booted LightOS on every power-on. This U-Boot's
