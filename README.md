@@ -14,10 +14,11 @@ on the `G` line; that version of `panel-generic-dsi` stops at the first
 parameter it doesn't know (`unknown param name` in dmesg), so it never read
 `lanes=4` and drove the panel on 1 lane, with a black screen. `name=` now goes
 last. `sdcard/` adds boot logs on the FAT partition, to work without a UART.
-LightOS stage 1, a busybox initramfs on ROCKNIX's kernel that boots once from
-the same card when `LIGHTOS.TXT` says so, is on the card and passes the U-Boot
-sandbox test, but has not been tried on the console yet
-(see [Booting LightOS once](#booting-lightos-once-next-to-rocknix)).
+LightOS stage 1, a busybox initramfs on ROCKNIX's kernel, boots from the same
+card when `LIGHTOS.TXT` says so (see
+[Booting LightOS once](#booting-lightos-once-next-to-rocknix)); the one-shot
+that brings the console back to ROCKNIX on the next power-on is on its second
+version, not yet tried on the console.
 
 ## Back up the ArkOS card first
 
@@ -213,20 +214,46 @@ evdev and the R36S joypad (`odroidgo3-joypad`). It
 
 1. shows each button as it is pressed, for 15 s, with its key code;
 2. writes `os.txt`, `init.txt`, `dmesg.txt` and `hardware.txt` (panel, DRM
-   modes, input devices, cpufreq, devfreq, temperatures, battery) to
-   `lightos/logs/boot-N`, with the same counter as ROCKNIX's boots;
+   modes, input devices, cpufreq, devfreq, temperatures, battery, the
+   one-shot token) to `lightos/logs/boot-N`, with the same counter as
+   ROCKNIX's boots;
 3. shares the FAT partition over the OTG port, like **LightOS SD via USB**,
    for 2 minutes;
 4. reboots when the computer ejects it, or when no computer came.
 
+The first boot, on 11 November, reached `init` 1.98 s after the kernel
+started. The `r36s_Gamepad` sent these key codes (evdev names):
+
+| Codes | evdev |
+|---|---|
+| 544, 545, 546, 547 | `BTN_DPAD_UP`, `DOWN`, `LEFT`, `RIGHT` |
+| 304, 305, 307, 308 | `BTN_SOUTH`, `EAST`, `NORTH`, `WEST` |
+| 310, 311, 312, 313 | `BTN_TL`, `TR`, `TL2`, `TR2` |
+| 314, 315, 316, 317 | `BTN_SELECT`, `START`, `MODE`, `THUMBL` |
+
+`BTN_THUMBR` (318) did not show up. Which physical button sends which code
+was not written down during that test: that mapping is still to do.
+
 **The one-shot.** `boot.ini` boots LightOS only when `LIGHTOS.TXT`, in the
-root of the FAT partition, starts with `L`. U-Boot first changes that letter
-to `R` with `fatwrite` and boots LightOS only if the write worked, so the
-power-on after that is ROCKNIX whatever LightOS does: a kernel that hangs
-needs a power cycle, not the card taken out. `panic=10` reboots by itself if
-`init` dies. The file is in the root because this U-Boot's 2017 `fatwrite`
-can't write in a subdirectory, and its name is upper-case 8.3, so it needs no
-long-name entry.
+root of the FAT partition, starts with `L`, a token that is new each time it
+is armed, and is at least 64 bytes long. U-Boot keeps the first 64 bytes of
+the last `LIGHTOS.TXT` it booted in **sector 31 of the partition**, the last
+of the 32 reserved sectors of this FAT32 (empty on the card, and nothing
+else uses it). It boots LightOS only for a token that is not already there,
+writes it there first with a raw `mmc write`, and only boots LightOS if the
+write worked. So the power-on after that is ROCKNIX whatever LightOS does: a
+kernel that hangs needs a power cycle, not the card taken out. It only
+writes over a sector that is empty or starts with `L`. `panic=10` reboots by
+itself if `init` dies.
+
+The first version had U-Boot rewrite the `L` in `LIGHTOS.TXT` with
+`fatwrite`, and the console booted LightOS on every power-on. This U-Boot's
+2017 `fatwrite` lower-cases the name it looks for, but only lower-cases a
+short name on disk when its NT case bits say so: an upper-case `LIGHTOS TXT`
+never matches. It then appends a second `LIGHTOS.TXT` (with `R`) at the end
+of the root directory and reports success, while Linux and macOS keep
+reading the first one (fsck: "Duplicate directory entry"). U-Boot now never
+writes to the file system.
 
 To arm it:
 
@@ -242,11 +269,14 @@ on the card shared by LightOS, then `tools/lightos_once.sh`, and eject.
 `tools/test_boot_ini.sh /Volumes/ROCKNIX` runs `sdcard/boot.ini` in a
 mainline U-Boot sandbox against a FAT32 image laid out like the card (the
 card's R36S tree and overlay, so `fdt apply` runs on the real files): no
-flag, `L`, the power-on after, `L` without `initrd.img`, another letter.
-It checks what `booti` gets and that the file system is clean after the
-write. The sandbox's `fatwrite` is newer than the console's, so after the
-first real LightOS boot check the card's file system too
-(`diskutil verifyVolume /Volumes/ROCKNIX`).
+flag, a token, the same token again, a new token, no `initrd.img`, another
+letter, a file under 64 bytes, a sector 31 that holds something else. It
+checks what `booti` gets, what is in sector 31, and that the rest of the
+partition is byte for byte the same. The sandbox's commands are newer than
+the console's: it checks the script's logic, not this U-Boot's quirks, as
+the `fatwrite` case showed. To look at the card itself, with it shared over
+USB: `sudo dd if=/dev/rdisk4 bs=1m | cat > out/fat.img` copies the partition
+(2 GB, about 75 s).
 
 ## Next steps
 

@@ -2,11 +2,12 @@
 # Runs sdcard/boot.ini in a U-Boot sandbox (mainline v2024.10, in Docker)
 # against a FAT32 image laid out like the ROCKNIX card, and checks the
 # LIGHTOS.TXT one-shot: which kernel arguments and initrd booti would get,
-# and that U-Boot rewrote the flag without breaking the file system.
+# what U-Boot leaves in sector 31 of the partition, and that it never
+# changes the file system.
 #
-# The sandbox's hush, load, itest, mw and fatwrite are newer than the
-# console's 2017 U-Boot, so this checks the script's logic, not that U-Boot's
-# FAT writer.
+# The sandbox's commands are newer than the console's 2017 U-Boot. This
+# checks the script's logic; the script only reads files and writes one raw
+# sector, so it doesn't depend on the 2017 FAT writer (see boot.ini).
 #
 # Usage: tools/test_boot_ini.sh [/Volumes/ROCKNIX]
 # With the card, its R36S tree and panel overlay go into the image, so
@@ -44,8 +45,13 @@ DTB=/w/u-boot/arch/sandbox/dts/test.dtb
 
 cd /t
 # The script as cfgload runs it: without the first line, and with booti
-# replaced by a line the test can read.
-tail -n +2 boot.ini | sed "s/^booti /echo RESULT /" > boot.cmd
+# replaced by a line the test can read. The sandbox crashes on "mmc read"
+# and "mmc write" (v2024.10 passes the address as a host pointer, without
+# map_sysmem), so they become "read/write mmc 1:0": the same raw blocks of
+# the same device.
+tail -n +2 boot.ini | sed -e "s/^booti /echo RESULT /" \
+  -e "s/if mmc read /if read mmc 1:0 /" -e "s/if mmc write /if write mmc 1:0 /" > boot.cmd
+grep -q "read mmc 1:0" boot.cmd && grep -q "write mmc 1:0" boot.cmd
 echo "echo ARGS \${bootargs}" >> boot.cmd
 mkimage -A sandbox -T script -C none -d boot.cmd boot.scr >/dev/null
 
@@ -74,8 +80,12 @@ make_image() {
   [ "$1" = no-initrd ] || mcopy -i "$I" initrd.img ::lightos/initrd.img
   mcopy -i "$I" boot.scr ::boot.scr
 }
-flag() { printf "%s\nrest of the file\n" "$1" > LIGHTOS.TXT; mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT; }
-first() { mtype -i "mmc1.img@@$OFF" ::LIGHTOS.TXT 2>/dev/null | head -c 1; }
+flag() {
+  { echo "L $1 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > LIGHTOS.TXT
+  mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT
+}
+# Sector 31 of the partition, first line.
+sector() { dd if=mmc1.img bs=512 skip=$((2048 + 31)) count=1 2>/dev/null | tr -d "\0" | head -n 1; }
 run() {
   $UB -d $DTB -c "setenv hwrev none; load mmc 1:1 0x800800 boot.scr && source 0x800800" 2>&1 | tr -d "\r" > out.txt || true
   RESULT=$(grep "^RESULT" out.txt | tail -1)
@@ -90,40 +100,64 @@ fsck_ok() {
   dd if=mmc1.img of=part.img bs=512 skip=2048 2>/dev/null
   fsck.vfat -n part.img > fsck.txt 2>&1 && echo clean || { echo damaged; sed "s/^/        /" fsck.txt >&2; }
 }
+# The partition without sector 31, to check nothing else was written.
+others() { dd if=mmc1.img bs=512 skip=2048 2>/dev/null | dd bs=512 count=31 2>/dev/null | md5sum | cut -c1-8
+           dd if=mmc1.img bs=512 skip=$((2048 + 32)) 2>/dev/null | md5sum | cut -c1-8; }
 rocknix="RESULT 0x02000000 - 0x01f00000"
 lightos="RESULT 0x02000000 0x04000000 0x01f00000"
+largs="ARGS rdinit=/lightos/init quiet panic=10 console=ttyS2,115200 console=tty0"
+rargs() { echo "$ARGS" | grep -q "^ARGS boot=LABEL=ROCKNIX" && echo rocknix || echo "$ARGS"; }
 
 echo "no LIGHTOS.TXT"
 make_image; run
 check booti "$RESULT" "$rocknix"
-echo "$ARGS" | grep -q "boot=LABEL=ROCKNIX" && echo "  ok    ROCKNIX arguments" || { echo "  FAIL  arguments: $ARGS"; fails=$((fails+1)); }
-grep -q "overlay\|FDT_ERR" out.txt && grep -i "fdt\|overlay" out.txt | sed "s/^/  note  /"
+check args "$(rargs)" rocknix
+check sector "$(sector)" ""
+grep -i "fdt_err\|failed to apply" out.txt | sed "s/^/  note  /"
 
-echo "LIGHTOS.TXT = L"
-make_image; flag L; run
+echo "LIGHTOS.TXT armed with token A"
+make_image; flag A; before=$(others); run
 check booti "$RESULT" "$lightos"
-check args "$ARGS" "ARGS rdinit=/lightos/init quiet panic=10 console=ttyS2,115200 console=tty0"
-check "flag after" "$(first)" R
+check args "$ARGS" "$largs"
+check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
+check "rest of the partition" "$(others)" "$before"
 check "file system" "$(fsck_ok)" clean
-size=$(mtype -i "mmc1.img@@$OFF" ::LIGHTOS.TXT | wc -c)
-check "flag size" "$size" "$(wc -c < LIGHTOS.TXT)"
-check "flag rest" "$(mtype -i "mmc1.img@@$OFF" ::LIGHTOS.TXT | tail -n +2)" "rest of the file"
 
-echo "second power-on (flag now R)"
+echo "second power-on, same token"
 run
 check booti "$RESULT" "$rocknix"
-check "flag after" "$(first)" R
+check args "$(rargs)" rocknix
+check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
 
-echo "LIGHTOS.TXT = L, no lightos/initrd.img"
-make_image no-initrd; flag L; run
-check booti "$RESULT" "$rocknix"
-echo "$ARGS" | grep -q "boot=LABEL=ROCKNIX" && echo "  ok    ROCKNIX arguments" || { echo "  FAIL  arguments: $ARGS"; fails=$((fails+1)); }
-check "flag after" "$(first)" R
+echo "armed again with token B"
+flag B; run
+check booti "$RESULT" "$lightos"
+check sector "$(sector)" "L B 0123456789abcdef0123456789abcdef"
+run
+check "and the power-on after" "$RESULT" "$rocknix"
 
-echo "LIGHTOS.TXT = x (any other letter)"
-make_image; flag x; run
+echo "armed, no lightos/initrd.img"
+make_image no-initrd; flag A; run
 check booti "$RESULT" "$rocknix"
-check "flag after" "$(first)" x
+check args "$(rargs)" rocknix
+check sector "$(sector)" ""
+
+echo "LIGHTOS.TXT starting with another letter"
+make_image; { echo "R A 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > LIGHTOS.TXT
+mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT; run
+check booti "$RESULT" "$rocknix"
+check sector "$(sector)" ""
+
+echo "LIGHTOS.TXT shorter than 64 bytes"
+make_image; echo "L short" > LIGHTOS.TXT; mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT; run
+check booti "$RESULT" "$rocknix"
+check sector "$(sector)" ""
+
+echo "sector 31 holds something else"
+make_image; flag A
+printf "XYZ not ours" | dd of=mmc1.img bs=512 seek=$((2048 + 31)) conv=notrunc 2>/dev/null; run
+check booti "$RESULT" "$rocknix"
+check sector "$(sector)" "XYZ not ours"
 
 rm -f mmc1.img part.img dummy
 [ $fails = 0 ] && echo "all checks passed" || { echo "$fails checks failed"; exit 1; }

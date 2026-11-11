@@ -9,8 +9,8 @@
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
 #   3. shares that partition over the OTG port, like "LightOS SD via USB";
 #   4. reboots when the computer ejects it, or when no computer came.
-# U-Boot already set LIGHTOS.TXT back to "R", so the reboot goes to ROCKNIX
-# unless the computer set it to "L" again.
+# U-Boot already kept LIGHTOS.TXT's token in sector 31 of the partition, so
+# the reboot goes to ROCKNIX unless the computer armed a new token.
 #
 # If this script stops, the kernel panics and panic=10 reboots.
 
@@ -78,8 +78,10 @@ hardware() {
   echo "== uptime"; cat /proc/uptime
   echo "== uname"; uname -a
   echo "== cmdline"; cat /proc/cmdline
-  echo "== LIGHTOS.TXT (U-Boot should have made it R)"
-  head -c 1 /flash/LIGHTOS.TXT 2>/dev/null; echo
+  echo "== LIGHTOS.TXT, first line"
+  head -n 1 /flash/LIGHTOS.TXT 2>/dev/null
+  echo "== sector 31 of $part (U-Boot's copy of the token it booted)"
+  dd if=$part bs=512 skip=31 count=1 2>/dev/null | head -n 1
   echo "== panel node"
   panel=/proc/device-tree/dsi@ff450000/panel@0
   tr '\0' ' ' < $panel/compatible; echo
