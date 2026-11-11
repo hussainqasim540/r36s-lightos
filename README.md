@@ -473,16 +473,19 @@ feedback (the driver found the rumble motor). Panel, DRM, cpufreq,
 devfreq, power supplies and the USB disk are the same. The dmesg has no
 errors or warnings. The panel's probe still takes 419 ms; dwc2's reset
 (125 ms) now runs in the deferred probe after it, so the total before
-`init` is the same. No button was pressed, so the key codes on 7.1 are
-not checked yet.
+`init` is the same.
+
+The guided button test on 7.1 (`boot-19`): all 20 buttons were pressed and
+each sent the same key code from the same device as on 6.12 (the table
+above, from `boot-14`), POWER included.
 
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
    a faster boot (first round done, 1.97 s to 1.44 s, see "Slimming it
    down"; second round, the jitter entropy RNG and the panel's delays,
-   1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, booted (the
-   guided button test on it is still to do).
+   1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, booted, all
+   buttons checked.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
