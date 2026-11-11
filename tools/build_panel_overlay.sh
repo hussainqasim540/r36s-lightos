@@ -33,10 +33,10 @@ rm -rf "$o"
 mkdir -p "$o"
 cp -X "$src" "$o/rocknix.dtbo"
 
-# dtc from the kernel tree (tools/build_kernel.sh builds it).
+# dtc from the kernel tree (tools/build_kernel.sh copies it to /w/bin).
 dtc() {
   docker run --rm -v lightos-kernel:/w -v "$o:/o" debian:trixie \
-    /w/linux-6.12.17/scripts/dtc/dtc -q "$@"
+    /w/bin/dtc -q "$@"
 }
 dtc -I dtb -O dts -o /o/rocknix.dts /o/rocknix.dtbo
 # Check that dtc gives the card's file back, byte for byte, from its source.

@@ -25,6 +25,7 @@ if [ -f "$card/rk3326-gameconsole-r36s.dtb" ]; then
   cp "$card/rk3326-gameconsole-r36s.dtb" "$work/"
   cp "$card/overlays/mipi-panel.dtbo" "$work/" 2>/dev/null || true
   cp "$here/out/panel/mipi-panel.dtbo" "$work/lightos-panel.dtbo" 2>/dev/null || true
+  cp "$here/out/kernel/rk3326-gameconsole-r36s.dtb" "$work/lightos.dtb" 2>/dev/null || true
   ls "$card" > "$work/root-names.txt"
 fi
 
@@ -55,6 +56,7 @@ tail -n +2 boot.ini | sed -e "s/^booti /echo RESULT /" \
 grep -q "read mmc 1:0" boot.cmd && grep -q "write mmc 1:0" boot.cmd
 echo "echo ARGS \${bootargs}" >> boot.cmd
 echo "echo DTBO \${dtbo}" >> boot.cmd
+echo "echo DTB \${dtb_file}" >> boot.cmd
 echo "fdt print /dsi@ff450000/panel@0 panel_description" >> boot.cmd
 mkimage -A sandbox -T script -C none -d boot.cmd boot.scr >/dev/null
 
@@ -81,8 +83,14 @@ make_image() {
   fi
   printf "LightOS test initrd" > initrd.img
   [ "$1" = no-initrd ] || mcopy -i "$I" initrd.img ::lightos/initrd.img
-  if [ "$1" = image ]; then head -c 1234567 /dev/urandom > Image; mcopy -i "$I" Image ::lightos/Image; fi
-  [ "$1" = panel ] && [ -f lightos-panel.dtbo ] && mcopy -i "$I" lightos-panel.dtbo ::lightos/mipi-panel.dtbo
+  if [ "$1" = image ] || [ "$1" = image-dtb ]; then head -c 1234567 /dev/urandom > Image; mcopy -i "$I" Image ::lightos/Image; fi
+  if [ "$1" = image-dtb ] || [ "$1" = dtb-only ]; then
+    if [ -f lightos.dtb ]; then mcopy -i "$I" lightos.dtb ::lightos/rk3326-gameconsole-r36s.dtb
+    else mcopy -i "$I" rk3326-gameconsole-r36s.dtb ::lightos/rk3326-gameconsole-r36s.dtb; fi
+  fi
+  if [ "$1" = panel ] || [ "$1" = image-dtb ]; then
+    [ -f lightos-panel.dtbo ] && mcopy -i "$I" lightos-panel.dtbo ::lightos/mipi-panel.dtbo
+  fi
   mcopy -i "$I" boot.scr ::boot.scr
 }
 flag() {
@@ -96,6 +104,7 @@ run() {
   RESULT=$(grep "^RESULT" out.txt | tail -1)
   ARGS=$(grep "^ARGS" out.txt | tail -1)
   DTBO=$(grep "^DTBO" out.txt | tail -1)
+  TREE=$(grep "^DTB " out.txt | tail -1)
   APPLY=$(grep -ci "fdt_err\|failed to apply\|libfdt" out.txt || true)
 }
 fails=0
@@ -129,6 +138,7 @@ check args "$ARGS" "$largs"
 check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
 check "kernel (no lightos/Image)" "$(grep -c "^1000000 bytes read" out.txt)" 1
 check "overlay (no lightos/mipi-panel.dtbo)" "$DTBO" "DTBO overlays/mipi-panel.dtbo"
+check "device tree" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
 check "rest of the partition" "$(others)" "$before"
 check "file system" "$(fsck_ok)" clean
 
@@ -172,6 +182,24 @@ if [ -f lightos-panel.dtbo ]; then
 else
   echo "  skip  no out/panel/mipi-panel.dtbo (tools/build_panel_overlay.sh)"
 fi
+
+echo "armed, with lightos/Image, its device tree and lightos/mipi-panel.dtbo (as installed)"
+make_image image-dtb; flag A; run
+check booti "$RESULT" "$lightos"
+check "device tree" "$TREE" "DTB lightos/rk3326-gameconsole-r36s.dtb"
+check "overlay errors" "$APPLY" 0
+if [ -f lightos-panel.dtbo ]; then
+  check overlay "$DTBO" "DTBO lightos/mipi-panel.dtbo"
+  check "delays in the tree" "$(grep -o "delays=[0-9,]*" out.txt)" "delays=20,10,20,0,20"
+fi
+run
+check "the power-on after" "$RESULT" "$rocknix"
+check "device tree then" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
+
+echo "armed, lightos device tree without lightos/Image"
+make_image dtb-only; flag A; run
+check booti "$RESULT" "$lightos"
+check "device tree" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
 
 echo "lightos/Image there but not armed"
 make_image image; run

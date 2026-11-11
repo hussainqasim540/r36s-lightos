@@ -33,8 +33,11 @@ else
   echo "No out/initrd.img (tools/build_initramfs.sh): LightOS can't boot from this card yet" >&2
 fi
 # Our kernel (tools/build_kernel.sh). Without it LightOS boots ROCKNIX's KERNEL.
+# The LightOS kernel and the device tree built with it (boot.ini uses that
+# one only together with lightos/Image).
 if [ -f "$here/../out/kernel/Image" ]; then
   cp -X "$here/../out/kernel/Image" "$card/lightos/Image"
+  cp -X "$here/../out/kernel/rk3326-gameconsole-r36s.dtb" "$card/lightos/rk3326-gameconsole-r36s.dtb"
 fi
 # LightOS's panel overlay, only if it was made from the overlay this card
 # has now (tools/build_panel_overlay.sh): a card with another panel boots

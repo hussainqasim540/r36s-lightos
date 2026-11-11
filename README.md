@@ -304,8 +304,8 @@ USB: `sudo dd if=/dev/rdisk4 bs=1m | cat > out/fat.img` copies the partition
 
 ## The LightOS kernel
 
-`tools/build_kernel.sh` builds our own kernel in Docker: Linux 6.12.17 from
-kernel.org (sha256 checked against `sha256sums.asc`) with ROCKNIX
+`tools/build_kernel.sh` builds our own kernel in Docker (now Linux 7.1.2,
+see "Linux 7.1" below). First it was Linux 6.12.17 from kernel.org (sha256 checked against `sha256sums.asc`) with ROCKNIX
 20250517's RK3326 patches in the order its `scripts/unpack` applies them
 (`packages/kernel/linux/patches/{mainline,panfrost}`, then
 `projects/Rockchip/patches/linux/{mainline,RK3326}`), its
@@ -425,13 +425,52 @@ messages and no `jent_mod_init`. The panel's probe took 418 ms instead of
 power, 10 ms reset, 20 ms after it, 200 ms after sleep out, 20 ms after
 display on) and about 150 ms to send the 190 commands of the init
 sequence. Next in line: dwc2's reset (130 ms), the PMIC on i2c (61 ms).
+These numbers are for 6.12.17; the kernel is now 7.1.2 (below).
+
+### Linux 7.1
+
+ROCKNIX moved its RK3326 build to Linux 7.1.2 (tag 20261101), and its tree
+changed shape: the kernel package is `projects/ROCKNIX/packages/linux`,
+the RK3326 patches are in `projects/ROCKNIX/devices/RK3326/patches/linux`,
+and the RK3326 device trees are ROCKNIX's own files
+(`devices/RK3326/linux/dts`), copied over the kernel's. `build_kernel.sh`
+follows it: Linux 7.1.2 from kernel.org (sha256 checked), the package's
+`mainline`, `mainline-rockchip` and `7.0` patches and then the device's,
+in `scripts/unpack`'s order, `panel-generic-dsi.c` as before, the device
+trees, and ROCKNIX's RK3326 config with `kernel/lightos.config` on top.
+The 6.12.17 build is in the git history (ROCKNIX 20250517).
+
+What changed for LightOS:
+
+- **The joypad.** The new R36S tree has `rocknix-singleadc-joypad`
+  instead of `odroidgo3-joypad`. ROCKNIX builds that driver as an
+  out-of-tree module (`hackbar/rocknix-joypad`, the commit and sha256 of
+  its `package.mk`); `build_kernel.sh` puts `rocknix-singleadc-joypad.c`
+  into `drivers/input/joystick` as `obj-y`. It links against
+  `joypad_input_g` from ROCKNIX's patch to `adc-keys`, so `KEYBOARD_ADC`
+  is back in (and in the fragment's required list), though the tree has no
+  adc-keys node. `odroidgo3-joypad` is off.
+- **Its own device tree.** The card's `rk3326-gameconsole-r36s.dtb` is
+  6.12's; `install_card.sh` copies the one built with the kernel to
+  `lightos/`, and `boot.ini` loads it only together with `lightos/Image`
+  (never with ROCKNIX's `KERNEL`). The panel node is still
+  `/dsi@ff450000/panel@0` (`gameconsole,r36s-panel`, `sitronix,st7703`),
+  so the card's overlay and LightOS's apply to it: the sandbox test boots
+  the installed combination (kernel, its tree, LightOS's overlay) and
+  checks the delays in the resulting tree.
+- **The fragment still holds** line for line on 7.1's config. Crypto
+  self-tests are now `CRYPTO_SELFTESTS`, off. New built in from ROCKNIX's
+  config: full preemption (`PREEMPT_LAZY`), the PX30 memory controller's
+  devfreq (its node is disabled in the R36S tree), some netfilter. The
+  `Image` is 17.8 MB (16.3 MB on 6.12).
 
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
    a faster boot (first round done, 1.97 s to 1.44 s, see "Slimming it
    down"; second round, the jitter entropy RNG and the panel's delays,
-   1.44 s to 1.02 s), then a newer mainline.
+   1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, built, to be tried
+   on the console.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
