@@ -302,11 +302,39 @@ the `fatwrite` case showed. To look at the card itself, with it shared over
 USB: `sudo dd if=/dev/rdisk4 bs=1m | cat > out/fat.img` copies the partition
 (2 GB, about 75 s).
 
+## The LightOS kernel
+
+`tools/build_kernel.sh` builds our own kernel in Docker: Linux 6.12.17 from
+kernel.org (sha256 checked against `sha256sums.asc`) with ROCKNIX
+20250517's RK3326 patches in the order its `scripts/unpack` applies them
+(`packages/kernel/linux/patches/{mainline,panfrost}`, then
+`projects/Rockchip/patches/linux/{mainline,RK3326}`), its
+`panel-generic-dsi.c` added as `obj-y`, and its RK3326 config. It builds
+with gcc 14.2, as ROCKNIX did. The changes from ROCKNIX's kernel are only:
+
+- no built-in initramfs: LightOS's `initrd.img` is the only one;
+- `-lightos` after the version, and the hostname `lightos`.
+
+Checked against the card: the R36S device tree comes out byte for byte the
+same as ROCKNIX's (`DTC_FLAGS=-@`, as ROCKNIX, keeps the `__symbols__` that
+`fdt apply` needs for the panel overlay), and the config extracted from
+ROCKNIX's `KERNEL` (IKCONFIG) differs only in the binutils version, the
+hostname, the initramfs and the version suffix. The built-in drivers
+LightOS uses (vfat, configfs, the mass-storage gadget, the USB role switch,
+evdev, the joypad, the panel) are built in here too. No modules are built.
+
+`tools/install_card.sh` copies it to `lightos/Image`; when the one-shot is
+armed and that file is there, `boot.ini` boots it instead of `KERNEL`
+(still with ROCKNIX's device tree and the panel overlay). `os.txt` in the
+logs says which kernel ran.
+
+The guided button test now runs only with a file `lightos/keytest` on the
+card; without it, buttons show on the screen for 10 s.
+
 ## Next steps
 
-1. Our own kernel next to ROCKNIX's, through the same one-shot: mainline
-   with ROCKNIX's RK3326 patches, its R36S device tree and
-   `panel-generic-dsi`, only the drivers the R36S uses, built in.
+1. Boot the LightOS kernel through the one-shot, then make it ours: a newer
+   mainline, only the drivers the R36S uses, built in, and a faster boot.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and

@@ -78,6 +78,7 @@ make_image() {
   fi
   printf "LightOS test initrd" > initrd.img
   [ "$1" = no-initrd ] || mcopy -i "$I" initrd.img ::lightos/initrd.img
+  if [ "$1" = image ]; then head -c 1234567 /dev/urandom > Image; mcopy -i "$I" Image ::lightos/Image; fi
   mcopy -i "$I" boot.scr ::boot.scr
 }
 flag() {
@@ -120,6 +121,7 @@ make_image; flag A; before=$(others); run
 check booti "$RESULT" "$lightos"
 check args "$ARGS" "$largs"
 check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
+check "kernel (no lightos/Image)" "$(grep -c "^1000000 bytes read" out.txt)" 1
 check "rest of the partition" "$(others)" "$before"
 check "file system" "$(fsck_ok)" clean
 
@@ -135,6 +137,20 @@ check booti "$RESULT" "$lightos"
 check sector "$(sector)" "L B 0123456789abcdef0123456789abcdef"
 run
 check "and the power-on after" "$RESULT" "$rocknix"
+
+echo "armed, with lightos/Image"
+make_image image; flag A; run
+check booti "$RESULT" "$lightos"
+check kernel "$(grep -c "^1234567 bytes read" out.txt)" 1
+check "not KERNEL" "$(grep -c "^1000000 bytes read" out.txt)" 0
+run
+check "the power-on after" "$RESULT" "$rocknix"
+check "kernel then" "$(grep -c "^1000000 bytes read" out.txt)" 1
+
+echo "lightos/Image there but not armed"
+make_image image; run
+check booti "$RESULT" "$rocknix"
+check kernel "$(grep -c "^1000000 bytes read" out.txt)" 1
 
 echo "armed, no lightos/initrd.img"
 make_image no-initrd; flag A; run
