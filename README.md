@@ -328,13 +328,24 @@ armed and that file is there, `boot.ini` boots it instead of `KERNEL`
 (still with ROCKNIX's device tree and the panel overlay). `os.txt` in the
 logs says which kernel ran.
 
+**Booted on the console on 11 November** (`boot-15`): `os.txt` says
+`LightOS kernel 6.12.17-lightos`, `init` started at 1.97 s (1.98 s on
+ROCKNIX's kernel), the panel came up the same way (overlay applied, 4
+lanes, DSI-1 connected at 640x480), the buttons and the USB disk worked.
+`hardware.txt` matches the boot on ROCKNIX's kernel apart from the version
+and 128 KB more RAM without ROCKNIX's initramfs; cpufreq offers only 1008
+and 1296 MHz and devfreq is empty on both. The dmesg has no errors or
+warnings, and differs only in measured numbers (XOR speed, stick
+calibration, the MMC tuning phase) and in the `raid6` benchmark, which only
+shows in ours and is the first thing to cut for boot time.
+
 The guided button test now runs only with a file `lightos/keytest` on the
 card; without it, buttons show on the screen for 10 s.
 
 ## Next steps
 
-1. Boot the LightOS kernel through the one-shot, then make it ours: a newer
-   mainline, only the drivers the R36S uses, built in, and a faster boot.
+1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
+   a faster boot (the `raid6` benchmark first), then a newer mainline.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
