@@ -210,8 +210,14 @@ unpacks over ROCKNIX's built-in initramfs, started with
 in modules: vfat, configfs, the mass-storage gadget, the USB role switch,
 evdev and the R36S joypad (`odroidgo3-joypad`). It
 
-1. shows each button as it is pressed, for 15 s, with its key code;
-2. writes `os.txt`, `init.txt`, `dmesg.txt` and `hardware.txt` (panel, DRM
+1. asks for each button in turn (D-pad up, right, down, left, X, A, B, Y,
+   L1, L2, R2, R1, FN, START, SELECT, left and right stick, volume + and -,
+   a short press of POWER), up to 30 s each, and writes the key code and
+   device of each to `keys.txt`; then shows any button until 2 minutes
+   from the start. Nothing in LightOS acts on `KEY_POWER`, but holding
+   POWER powers off (the PMIC). RESET is a hardware reset and is left out;
+2. writes `os.txt`, `init.txt`, `keys.txt`, `keys-raw.txt`, `dmesg.txt` and
+   `hardware.txt` (panel, DRM
    modes, input devices, cpufreq, devfreq, temperatures, battery, the
    one-shot token) to `lightos/logs/boot-N`, with the same counter as
    ROCKNIX's boots;

@@ -4,7 +4,8 @@
 # For now it runs on ROCKNIX's kernel: U-Boot passes lightos/initrd.img,
 # which the kernel unpacks over ROCKNIX's built-in initramfs, and this script
 # replaces ROCKNIX's /init. It
-#   1. shows the buttons as they are pressed, for KEY_SECONDS;
+#   1. asks for each button in turn and logs its key code (keys.txt), then
+#      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
 #   3. shares that partition over the OTG port, like "LightOS SD via USB";
@@ -15,7 +16,6 @@
 # If this script stops, the kernel panics and panic=10 reboots.
 
 export PATH=/lightos/bin
-KEY_SECONDS=15
 WAIT_HOST=120
 WAIT_GONE=20
 LOG=/tmp/lightos-init.txt
@@ -35,10 +35,45 @@ printf '\033[2J\033[H'
 say "R36S LightOS (busybox initramfs, $(uname -r))"
 say "init started at ${t_init} s"
 
-# 1. Buttons. One reader per input device; an evdev read returns whole
-# 24-byte events: time (16), type, code (u16), value (s32).
+# 1. Buttons, guided: the screen asks for one button at a time, in the
+# order below, and keys.txt gets the key code and device each one sent. A
+# step with no press for STEP_SECONDS is skipped. Then any button shows on
+# the screen until KEYS_MIN_SECONDS from the start. POWER comes last: nothing
+# in LightOS acts on KEY_POWER, but holding it powers off (the PMIC). RESET
+# is a hardware reset and is not asked for.
+STEPS='D-pad up
+D-pad right
+D-pad down
+D-pad left
+X
+A
+B
+Y
+L1
+L2
+R2
+R1
+FN
+START
+SELECT
+Left stick, pressed
+Right stick, pressed
+Volume +
+Volume -
+POWER, short press only, do not hold it'
+STEP_SECONDS=30
+KEYS_MIN_SECONDS=120
+RAW=/tmp/keys-raw.txt
+KEYS=/tmp/keys.txt
+: > $RAW
+: > $KEYS
+secs() { cut -d. -f1 /proc/uptime; }
+lines() { wc -l < $RAW; }
+
+# One reader per input device; an evdev read returns whole 24-byte events:
+# time (16), type, code (u16), value (s32). Presses (EV_KEY 1, value 1) go
+# to $RAW as "uptime code device".
 say ""
-say "Press buttons: each one shows here (${KEY_SECONDS} s)."
 readers=
 for ev in /dev/input/event*; do
   [ -c "$ev" ] || continue
@@ -48,15 +83,72 @@ for ev in /dev/input/event*; do
     while :; do
       set -- $(dd if=$ev bs=24 count=1 2>/dev/null | od -An -tu2)
       [ $# -ge 11 ] || exit 0
-      # EV_KEY (1), pressed (1)
-      [ "$9" = 1 ] && [ "${11}" = 1 ] && say "  key ${10} on $name"
+      [ "$9" = 1 ] && [ "${11}" = 1 ] && echo "$(up) ${10} $name" >> $RAW
     done
   ) &
   readers="$readers $!"
 done
-sleep $KEY_SECONDS
+sleep 2
+
+t_keys=$(secs)
+n_steps=$(echo "$STEPS" | wc -l)
+i=0
+while read -r step; do
+  i=$((i + 1))
+  seen=$(lines)
+  printf '\033[2J\033[H'
+  echo "LightOS button test: $i of $n_steps"
+  echo ""
+  echo "    Press:  $step"
+  echo ""
+  echo "($STEP_SECONDS s for each button; wait to skip one)"
+  echo ""
+  tail -n 18 $KEYS
+  got=
+  tick=0
+  while [ $tick -lt $((STEP_SECONDS * 10)) ]; do
+    if [ "$(lines)" -gt "$seen" ]; then
+      got=$(sed -n "$((seen + 1))p" $RAW)
+      break
+    fi
+    usleep 100000
+    tick=$((tick + 1))
+  done
+  if [ -n "$got" ]; then
+    set -- $got
+    shift
+    code=$1
+    shift
+    echo "$step: $code ($*)" >> $KEYS
+  else
+    echo "$step: not pressed" >> $KEYS
+  fi
+  # Anything else that came with that press (bounce) is not the next step.
+  usleep 300000
+done <<EOF_STEPS
+$STEPS
+EOF_STEPS
+
+printf '\033[2J\033[H'
+cat $KEYS
+echo ""
+echo "Free test: any button shows here until $KEYS_MIN_SECONDS s."
+seen=$(lines)
+while [ $(( $(secs) - t_keys )) -lt $KEYS_MIN_SECONDS ]; do
+  now=$(lines)
+  if [ "$now" -gt "$seen" ]; then
+    sed -n "$((seen + 1)),${now}p" $RAW | while read -r t code dev; do
+      echo "  key $code on $dev"
+    done
+    seen=$now
+  fi
+  usleep 200000
+done
 kill $readers 2>/dev/null
 killall dd 2>/dev/null
+printf '\033[2J\033[H'
+say "Button test done ($(( $(secs) - t_keys )) s)."
+cat $KEYS >> $LOG
 
 # 2. Logs on the FAT partition.
 part=
@@ -139,6 +231,8 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   hardware > $dir/hardware.txt 2>&1
   dmesg > $dir/dmesg.txt
   cp $LOG $dir/init.txt
+  cp $KEYS $dir/keys.txt
+  cp $RAW $dir/keys-raw.txt
   sync
   umount /flash
 else
