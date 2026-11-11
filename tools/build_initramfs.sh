@@ -3,7 +3,9 @@
 # works): a static busybox from Alpine with its applets in /lightos/bin, and
 # initramfs/init as /lightos/init, in a newc cpio wrapped as a U-Boot legacy
 # ramdisk (this U-Boot has no raw initrd support). Uncompressed, so any
-# kernel can unpack it. out/initrd.txt lists what went in.
+# kernel can unpack it. out/initrd.txt lists what went in. out/stage1.tar
+# holds the same /lightos tree, for the Buildroot root file system
+# (tools/build_rootfs.sh), so stage 2 runs the same init with the same tools.
 #
 # Usage: tools/build_initramfs.sh
 # Then: tools/install_card.sh copies it to lightos/initrd.img on the card.
@@ -24,6 +26,7 @@ docker run --rm -v "$here:/src" alpine:3.20 sh -euc '
   mknod -m 600 $r/dev/console c 5 1
   $r/lightos/bin/sh -n $r/lightos/init
   (cd $r && find . -mindepth 1 | sort | cpio -o -H newc 2>/dev/null) > /tmp/initrd.cpio
+  tar -cf /src/out/stage1.tar -C $r lightos
   mkimage -A arm64 -O linux -T ramdisk -C none -n "R36S LightOS stage 1" \
     -d /tmp/initrd.cpio /src/out/initrd.img > /tmp/mkimage.txt
   {

@@ -39,6 +39,11 @@ if [ -f "$here/../out/kernel/Image" ]; then
   cp -X "$here/../out/kernel/Image" "$card/lightos/Image"
   cp -X "$here/../out/kernel/rk3326-gameconsole-r36s.dtb" "$card/lightos/rk3326-gameconsole-r36s.dtb"
 fi
+# The root file system (tools/build_rootfs.sh): stage 1 copies it to RAM and
+# hands over to it. Without it LightOS stays in the initramfs.
+if [ -f "$here/../out/rootfs/rootfs.sqfs" ]; then
+  cp -X "$here/../out/rootfs/rootfs.sqfs" "$card/lightos/rootfs.sqfs"
+fi
 # LightOS's panel overlay, only if it was made from the overlay this card
 # has now (tools/build_panel_overlay.sh): a card with another panel boots
 # LightOS with its own overlays/mipi-panel.dtbo.

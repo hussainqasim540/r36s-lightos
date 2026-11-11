@@ -1,9 +1,19 @@
 #!/lightos/bin/sh
-# R36S LightOS, stage 1: the first program of a LightOS boot (rdinit=).
+# R36S LightOS init: the first program of a LightOS boot (rdinit=), and the
+# same script again in the root file system.
 #
 # U-Boot passes lightos/initrd.img with our kernel (lightos/Image, built by
 # tools/build_kernel.sh) or ROCKNIX's KERNEL; that one unpacks it over its
-# own built-in initramfs, and this script replaces ROCKNIX's /init. It
+# own built-in initramfs, and this script replaces ROCKNIX's /init.
+#
+# Stage 1 (the initramfs): with lightos/rootfs.sqfs on the card (Buildroot,
+# tools/build_rootfs.sh), it copies it to RAM, mounts it and hands over to
+# /lightos/init there, stage 2, which goes on below. Without it, or if that
+# fails, stage 1 goes on by itself. The root file system holds the same
+# /lightos tree (busybox and this script), plus Mesa, kmscube and ALSA.
+#
+# Then it
+#   0. in stage 2, runs kmscube for 10 s on the GPU (gpu.txt);
 #   1. asks for each button in turn and logs its key code (keys.txt), then
 #      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
@@ -15,25 +25,32 @@
 #
 # If this script stops, the kernel panics and panic=10 reboots.
 
-export PATH=/lightos/bin
+export PATH=/lightos/bin:/usr/bin:/usr/sbin:/bin:/sbin
 WAIT_HOST=120
 WAIT_GONE=20
 LOG=/tmp/lightos-init.txt
 G=/sys/kernel/config/usb_gadget/lightos
 
-mkdir -p /proc /sys /dev /tmp /flash
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
+stage=1
+[ -e /lightos/stage2 ] && stage=2
+# Stage 2 gets /proc, /sys (with configfs) and /dev from stage 1.
+[ $stage = 1 ] && mkdir -p /proc /sys /dev /tmp /flash
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys || mount -t sysfs sysfs /sys
 mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
-mount -t configfs configfs /sys/kernel/config 2>/dev/null
+mountpoint -q /sys/kernel/config || mount -t configfs configfs /sys/kernel/config 2>/dev/null
 
 up() { cut -d' ' -f1 /proc/uptime; }
 say() { echo "$*"; echo "$(up) $*" >> $LOG; }
 t_init=$(up)
 
-printf '\033[2J\033[H'
-say "R36S LightOS (busybox initramfs, $(uname -r))"
-say "init started at ${t_init} s"
+if [ $stage = 1 ]; then
+  printf '\033[2J\033[H'
+  say "R36S LightOS (busybox initramfs, $(uname -r))"
+  say "init started at ${t_init} s"
+else
+  say "Stage 2 (root file system) started at ${t_init} s"
+fi
 
 # The FAT partition (ROCKNIX's /flash): logs, the USB disk, and whether to
 # run the guided button test.
@@ -50,10 +67,69 @@ if [ -z "$part" ]; then
   sleep 10
   reboot -f
 fi
+
+# 0. Stage 1 hands over to the root file system on the card, if there is
+# one. It runs from RAM, so the card is free for the logs and the USB disk.
+if [ $stage = 1 ] && mount -t vfat -o ro "$part" /flash; then
+  if [ -f /flash/lightos/rootfs.sqfs ]; then
+    t0=$(up)
+    if cp /flash/lightos/rootfs.sqfs /rootfs.sqfs; then
+      umount /flash
+      mkdir -p /newroot
+      if mount -t squashfs -o loop,ro /rootfs.sqfs /newroot && [ -x /newroot/lightos/init ]; then
+        say "Root file system: lightos/rootfs.sqfs, $(( $(wc -c < /rootfs.sqfs) / 1024 )) KiB, copied from ${t0} s to $(up) s"
+        mount -t tmpfs tmpfs /newroot/tmp
+        cp $LOG /newroot$LOG
+        mount --move /dev /newroot/dev
+        mount --move /proc /newroot/proc
+        mount --move /sys /newroot/sys
+        # busybox's switch_root, before it empties the initramfs, wants a
+        # regular file /init there to be sure that it is one (ours starts
+        # with rdinit=/lightos/init and has none).
+        [ -f /init ] || : > /init
+        exec switch_root /newroot /lightos/init
+      fi
+      say "Could not mount lightos/rootfs.sqfs: going on in stage 1."
+      umount /newroot 2>/dev/null
+    else
+      say "Could not copy lightos/rootfs.sqfs: going on in stage 1."
+    fi
+    rm -f /rootfs.sqfs
+  fi
+  umount /flash 2>/dev/null
+fi
 guided=no
 if mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
   umount /flash
+fi
+
+# 0. The GPU, in stage 2: kmscube draws through Mesa's Panfrost on the
+# panel for 600 frames (10 s at 60 Hz), killed after 20 s if it hangs. What
+# it prints (the EGL and GL renderer, the mode) goes to gpu.txt.
+GPU=/tmp/gpu.txt
+: > $GPU
+if [ $stage = 2 ] && command -v kmscube >/dev/null; then
+  say "GPU: kmscube, 600 frames"
+  { echo "== /sys/class/drm"; ls /sys/class/drm
+    echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20
+    echo "== kmscube"; } >> $GPU 2>&1
+  t0=$(up)
+  kmscube -c 600 >> $GPU 2>&1 &
+  k=$!
+  i=0
+  while kill -0 $k 2>/dev/null && [ $i -lt 200 ]; do
+    usleep 100000
+    i=$((i + 1))
+  done
+  if kill -0 $k 2>/dev/null; then
+    kill $k
+    echo "== killed after 20 s" >> $GPU
+  fi
+  wait $k
+  echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
+  say "GPU: kmscube from ${t0} s to $(up) s, $(grep -m1 -i "GL_RENDERER" $GPU)"
+  printf '\033[2J\033[H'
 fi
 
 # 1. Buttons. With lightos/keytest on the card, guided: the screen asks for
@@ -180,6 +256,7 @@ cat $KEYS >> $LOG
 hardware() {
   echo "== uptime"; cat /proc/uptime
   echo "== uname"; uname -a
+  echo "== stage"; echo $stage; cat /lightos/stage2 /etc/os-release 2>/dev/null
   echo "== cmdline"; cat /proc/cmdline
   echo "== LIGHTOS.TXT, first line"
   head -n 1 /flash/LIGHTOS.TXT 2>/dev/null
@@ -243,12 +320,17 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
     *-lightos) kernel="LightOS kernel" ;;
     *) kernel="ROCKNIX's kernel" ;;
   esac
-  echo "LightOS stage 1 (busybox initramfs on $kernel $(uname -r))" > $dir/os.txt
+  if [ $stage = 2 ]; then
+    echo "LightOS stage 2 (Buildroot root file system on $kernel $(uname -r))" > $dir/os.txt
+  else
+    echo "LightOS stage 1 (busybox initramfs on $kernel $(uname -r))" > $dir/os.txt
+  fi
   hardware > $dir/hardware.txt 2>&1
   dmesg > $dir/dmesg.txt
   cp $LOG $dir/init.txt
   cp $KEYS $dir/keys.txt
   cp $RAW $dir/keys-raw.txt
+  [ -s $GPU ] && cp $GPU $dir/gpu.txt
   sync
   umount /flash
 else
