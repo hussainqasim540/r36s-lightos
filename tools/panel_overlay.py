@@ -193,9 +193,12 @@ def description(panel, name):
         20,
     ]
     size = (panel.u32("width-mm", 52), panel.u32("height-mm", 70))
+    # name goes last: the generic-dsi driver of ROCKNIX 20250517 stops at the
+    # first parameter it doesn't know, and it doesn't know name. With name
+    # first it read nothing else and drove the panel on 1 lane.
     lines = [
-        f"G name='{name}' size={size[0]},{size[1]} delays={','.join(map(str, delays))} "
-        f"format={fmt} lanes={panel.u32('dsi,lanes', 4)} flags=0x{flags:x}"
+        f"G size={size[0]},{size[1]} delays={','.join(map(str, delays))} "
+        f"format={fmt} lanes={panel.u32('dsi,lanes', 4)} flags=0x{flags:x} name='{name}'"
     ]
     clock, hor, ver = native_mode(panel)
     original_fps = clock * 1000 / (sum(hor) * sum(ver))

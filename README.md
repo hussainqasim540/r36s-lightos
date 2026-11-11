@@ -7,7 +7,13 @@ cores built for the Cortex-A35.
 
 **Status:** there is no image to flash yet. This repo holds the first step:
 checking that the mainline kernel drives the R36S panel, using ROCKNIX as a
-test bench on a spare microSD card.
+test bench on a spare microSD card. **Panel 4 works on mainline:** ROCKNIX
+20250517 (kernel 6.12.17) with `rk3326-gameconsole-r36s.dtb` and the overlay
+from `panel_overlay.py` shows a picture. The first overlays put `name=` first
+on the `G` line; that version of `panel-generic-dsi` stops at the first
+parameter it doesn't know (`unknown param name` in dmesg), so it never read
+`lanes=4` and drove the panel on 1 lane, with a black screen. `name=` now goes
+last. `sdcard/` adds boot logs on the FAT partition, to work without a UART.
 
 ## Back up the ArkOS card first
 
@@ -114,9 +120,66 @@ rk3326-r35s-linux.dtb -O dtbo -o /flash/overlays/mipi-panel.dtbo` (after
 overlays (`mipi-panel.dtbo.r36s-panel*`) from
 [stolen/r.nix-distribution](https://github.com/stolen/r.nix-distribution/releases/tag/panel_overlays).
 
+## Working on the card without taking it out
+
+`sdcard/` holds files for the FAT partition of a ROCKNIX **20250517 A** card,
+whose Hardkernel U-Boot reads `boot.ini` as plain text. With the card in the
+computer:
+
+```bash
+tools/install_card.sh /Volumes/ROCKNIX
+```
+
+The first run keeps the card's own `boot.ini` as `lightos/boot.ini.before`.
+`sdcard/boot.ini` is the one that got the system as far as mounting
+`/storage` on 7 November: `rk3326-gameconsole-r36s.dtb` plus
+`overlays/mipi-panel.dtbo`.
+
+**Not U-Boot's `ums`.** The SD card over USB from U-Boot does not work with
+this U-Boot (ROCKNIX/hardkernel-uboot `611716f`, `odroidgoa_defconfig`), for
+two reasons found in its source:
+
+- no board code implements `g_dnl_board_usb_cable_connected()`, so the weak
+  default reports a cable as always connected and `ums` never returns, even
+  with the cable unplugged: the console stays in U-Boot until it is powered
+  off;
+- U-Boot runs on the ODROID-GO Advance tree (`odroidgoa.dts`), which sets the
+  OTG port of the USB PHY to `disabled`, since that console has no data OTG
+  port.
+
+A first `boot.ini` that started `ums` on Vol- never showed a disk on the
+computer, and no boot that day reached `/storage`. A USB path has to come
+from Linux instead (ROCKNIX's dwc2 gadget), once the system is known to boot.
+
+**Did it boot?** Without a UART, the STORAGE superblock tells: its mount count
+and last mount time (offsets `0x34` and `0x2C` of the superblock, 1024 bytes
+into the partition) only change when the initramfs gets as far as mounting
+`/storage`.
+
+```bash
+sudo dd if=/dev/rdisk4s2 bs=4096 count=1 of=out/storage-sb.bin
+```
+
+**Boot logs instead of a UART.** ROCKNIX's initramfs runs
+`/flash/mount-storage.sh` in place of its own `/storage` mount. Ours does that
+mount, opens `lightos/logs/boot-N/` (the last 5 boots are kept), saves
+`dmesg` from the initramfs, and installs `lightos-diag.service` in
+`/storage/.config/system.d`. The service writes `dmesg.txt`, `journal.txt` and
+`hardware.txt` (panel node, DRM connector and modes, backlight, USB device
+controller, failed units) 20 s, 60 s and 180 s after starting. A
+`boot-N` folder with only `cmdline.txt` and `dmesg-initramfs.txt` means the
+system stopped between the initramfs and systemd; no new folder at all means
+the kernel never reached the initramfs.
+
+To go back: copy `lightos/boot.ini.before` over `boot.ini`, and delete
+`mount-storage.sh` and `lightos/`. The service left in `/storage` does nothing
+once `lightos/diag.sh` is gone.
+
 ## Next steps
 
-1. Confirm Panel 4 on mainline, as above.
+1. The FAT partition over USB from Linux: the 20250517 kernel has the dwc2
+   in dual-role mode and `CONFIG_USB_CONFIGFS_MASS_STORAGE`, so a configfs
+   gadget can hand `mmcblk1p1` to the computer.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
