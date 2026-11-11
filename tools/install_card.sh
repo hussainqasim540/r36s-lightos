@@ -36,6 +36,16 @@ fi
 if [ -f "$here/../out/kernel/Image" ]; then
   cp -X "$here/../out/kernel/Image" "$card/lightos/Image"
 fi
+# LightOS's panel overlay, only if it was made from the overlay this card
+# has now (tools/build_panel_overlay.sh): a card with another panel boots
+# LightOS with its own overlays/mipi-panel.dtbo.
+panel=$here/../out/panel
+if [ -f "$panel/mipi-panel.dtbo" ] && cmp -s "$panel/rocknix.dtbo" "$card/overlays/mipi-panel.dtbo"; then
+  cp -X "$panel/mipi-panel.dtbo" "$card/lightos/mipi-panel.dtbo"
+elif [ -f "$card/lightos/mipi-panel.dtbo" ]; then
+  rm -f "$card/lightos/mipi-panel.dtbo"
+  echo "Removed lightos/mipi-panel.dtbo: out/panel is not from this card's overlay (tools/build_panel_overlay.sh)" >&2
+fi
 
 # macOS leaves ._ files on FAT; U-Boot and ROCKNIX don't need them.
 dot_clean -m "$card" 2>/dev/null || true
@@ -44,3 +54,4 @@ sync
 echo "Installed on $card:"
 ls -l "$card/boot.ini" "$card/mount-storage.sh" "$card/lightos"
 [ -f "$card/overlays/mipi-panel.dtbo" ] && echo "Panel overlay: overlays/mipi-panel.dtbo" || echo "No panel overlay on the card"
+[ -f "$card/lightos/mipi-panel.dtbo" ] && echo "LightOS panel overlay: lightos/mipi-panel.dtbo"

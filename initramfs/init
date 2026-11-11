@@ -189,6 +189,7 @@ hardware() {
   panel=/proc/device-tree/dsi@ff450000/panel@0
   tr '\0' ' ' < $panel/compatible; echo
   [ -e $panel/panel_description ] && echo "panel_description present: the overlay was applied"
+  [ -e $panel/panel_description ] && tr '\0' '\n' < $panel/panel_description | head -n 1
   for c in /sys/class/drm/card*-*; do
     [ -d "$c" ] || continue
     echo "== $c"

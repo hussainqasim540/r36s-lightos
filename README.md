@@ -386,12 +386,41 @@ buttons and the USB disk worked, and the dmesg has no messages that
 
 The SD card's tuning (done at 0.92 s) now ends before the panel does.
 
+Second round, the two biggest waits that are not hardware:
+
+- **The jitter entropy RNG** (156 ms): the crypto API's DRBG pulls it in,
+  set `=y` in ROCKNIX's config and selected by `echainiv` (IPsec). All
+  three are modules now, so not built; the kernel's own `/dev/random` does
+  not use them.
+- **The panel's delays.** `panel-generic-dsi` reads
+  `delays=prepare,reset,init,enable,ready` (ms) from the overlay's G line:
+  it powers the panel, waits *prepare*, holds the reset line for *reset*,
+  waits *init*, sends the init sequence (each command with its own wait),
+  then display on and sleep out, and waits *enable* (*ready* is unused).
+  The R36S overlay has `20,150,20,120,20`, and its sequence already ends
+  with sleep out (`11`, 200 ms) and display on (`29`, 20 ms). The reset
+  line has to be held for microseconds, not 150 ms (the wait after it is
+  *init*, unchanged), and the driver's display on and sleep out go to a
+  panel already out of sleep, so the 120 ms after them wait for nothing.
+  `tools/build_panel_overlay.sh` makes `lightos/mipi-panel.dtbo` from the
+  card's own `overlays/mipi-panel.dtbo` (the R36S clones have different
+  panels), with only those two changed: `20,10,20,0,20`. It checks that
+  dtc rebuilds the card's file byte for byte first, and keeps *enable* if
+  the sequence lacks sleep out or display on. `boot.ini` applies it only
+  when it boots LightOS; ROCKNIX keeps its overlay. `tools/install_card.sh`
+  copies it only if it was made from the overlay the card has now. The
+  sandbox test checks which overlay is applied and the delays in the
+  resulting tree, for LightOS and for the ROCKNIX boot after it.
+  `hardware.txt` now shows the G line the kernel got.
+
+Together about 415 ms (156 + 140 + 120) out of boot-16's 1.44 s.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
    a faster boot (first round done, 1.97 s to 1.44 s, see "Slimming it
-   down": next, the jitter entropy RNG and the panel's delays), then a
-   newer mainline.
+   down"; second round, the jitter entropy RNG and the panel's delays,
+   to be tried on the console), then a newer mainline.
 2. A Buildroot tree (`buildroot/`) that builds:
    - mainline u-boot and the Rockchip TPL/BL31 from `rkbin`;
    - a mainline kernel with ROCKNIX's RK3326 patches, its R36S device tree and
