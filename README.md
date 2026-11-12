@@ -647,6 +647,47 @@ inverted. It does not matter for the speaker, which uses the same
 output. It needs checking with real headphones before slot relies on
 it.
 
+## slot on LightOS
+
+With `slot/` on the FAT partition, stage 2 starts slot in place of the
+self-tests and the button test. `slot/` is slot-r36s's `dist-r36s/slot`
+with games in `slot/Games/GBA`. The environment is the one slot's ArkOS
+launcher sets: `SLOT_ROOT=/flash/slot`, `SLOT_RUN=/run` on a tmpfs, gpSP
+for the GBA, and the codec on HP at full, since slot sets the volume in
+software. slot's poweroff and reboot are shims that end slot. init then
+writes the logs, with `slot.log`, shares the card over USB, and reboots
+to ROCKNIX. `lightos/noslot` or `lightos/keytest` on the card brings back
+the old boot.
+
+slot needs no libudev. It loads EGL, GLES, GBM, libdrm and ALSA itself,
+and reads `/dev/input` directly.
+
+On the mainline kernel the joypad is called `r36s_Gamepad`, not ArkOS's
+`GO-Super Gamepad`. slot fell back to its Anbernic map, so no button
+worked (boot-40). slot-r36s 2646538 gives that name its own map: the
+same as ArkOS's, but with SELECT, START and FN on `BTN_SELECT`,
+`BTN_START` and `BTN_MODE`. On boot-41 the buttons, gpSP games and sound
+worked.
+
+Mesa's shader cache is kept on the card, in `lightos/cache`; in `/tmp`
+it was empty at every boot. slot keeps its label cache in
+`slot/System/Cache`. Here is the time from slot's start to its first
+frame, from `slot.log`:
+
+| | boot-41 | boot-42 | boot-44 |
+|---|---|---|---|
+| Caches | none | labels | labels and shaders |
+| Surface (KMS, EGL, Mesa from the squashfs) | 0.39 s | 0.44 s | 0.39 s |
+| Compositor (shaders) | 0.21 s | 0.21 s | 0.13 s |
+| Cart and shelf faces, bezel | 0.93 s | 0.66 s | 0.67 s |
+| UI faces | 0.78 s | 0.72 s | 0.79 s |
+| First frame | 2.50 s | 2.21 s | 2.16 s |
+
+On boot-44 slot started at 1.98 s after the kernel, so its first frame
+came at 4.14 s. Of that, 2.16 s is slot's own start-up. Most of it is
+the faces and the UI, which slot draws on the CPU, and that is work for
+slot itself.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
@@ -655,12 +696,14 @@ it.
    1.44 s to 1.02 s); Linux 7.1.2 as ROCKNIX 20261101, booted, all
    buttons checked.
 2. A Buildroot root file system (`buildroot/`, see "The root file
-   system"): Mesa with Panfrost and kmscube first; then ALSA, eudev
-   (slot links libudev), slot and the GB/GBC/GBA cores. The kernel stays
+   system"): Mesa with Panfrost and kmscube, ALSA, then slot and its
+   gpSP and mGBA cores, done (see "slot on LightOS"; eudev turned out
+   not to be needed). The kernel stays
    `tools/build_kernel.sh`'s. Mainline U-Boot with the Rockchip TPL/BL31
    from `rkbin` comes later, on a card of its own, since the bench card
    keeps ROCKNIX's bootloader.
 3. Boot into slot from init in a few seconds, with clocks and the cpufreq
-   governor managed by slot.
+   governor managed by slot: slot's first frame is at 4.1 s after the
+   kernel (boot-44), 2.2 s of it in slot's own start-up.
 4. Overclocking: extra OPPs for CPU, GPU and DDR in the device tree, tested one
    step at a time.

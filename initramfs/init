@@ -206,7 +206,9 @@ SLOT=/flash/slot
 if [ $slot = yes ]; then
   if mount -t vfat -o rw,noatime "$part" /flash; then
     mountpoint -q /run || mount -t tmpfs tmpfs /run
-    mkdir -p /tmp/data /tmp/cache /tmp/slot-shims $SLOT/Logs
+    # Mesa's shader cache on the card, so that slot's shaders are compiled
+    # once and not at every boot (in /tmp it starts empty each time).
+    mkdir -p /tmp/data /flash/lightos/cache /tmp/slot-shims $SLOT/Logs
     for c in poweroff reboot; do
       printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -TERM $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
       chmod +x /tmp/slot-shims/$c
@@ -216,7 +218,7 @@ if [ $slot = yes ]; then
     [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1
     t0=$(up)
     say "slot: started at ${t0} s"
-    PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/tmp/cache \
+    PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
       SLOT_ROOT=$SLOT SLOT_RUN=/run BASEOS_TARGET=r36s BASEOS_MODEL=R36S \
       SLOT_GBA_CORE=gpsp SLOT_PACER=off \
       $SLOT/System/slot < /dev/null > $SLOT/Logs/slot.log 2>&1
