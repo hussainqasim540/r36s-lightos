@@ -61,7 +61,7 @@ run() {  # run CASE
   mkdir -p /mnt/$1; mount -o ro $loop /mnt/$1
   b=/mnt/$1/lightos/logs/boot-1
   echo "== $1: $(cat $b/os.txt 2>/dev/null || echo "no logs")"
-  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng" || true
+  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng|Sound" || true
   case $1 in
     good)
       check $1 "os.txt says stage 2" $b/os.txt "^LightOS stage 2"
@@ -72,6 +72,8 @@ run() {  # run CASE
       check $1 "reached the USB step" console-$1.txt "No USB device controller"
       if [ -f /src/out/rootfs/rootfs.sqfs ]; then
         ls /mnt/$1/lightos/seed > seed-$1.txt 2>&1 || true
+        # No sound card in Docker either: speaker-test starts and fails.
+        check $1 "sound.txt: speaker-test ran" $b/sound.txt "^== done"
         check $1 "init.txt: seedrng at the start" $b/init.txt "seedrng from"
         check $1 "a creditable seed on the card" seed-$1.txt "seed.credit"
         # No GPU in Docker: kmscube has to start and fail on the DRM device.

@@ -617,6 +617,35 @@ boot-33 shows the result:
   comes about 0.6 s after kmscube starts, cold;
 - 599 frames at 59.94 fps, as before.
 
+### Sound: the speaker is on the headphone output
+
+The rk817's sound card (`rk817_int`) works on the LightOS kernel without
+any changes. The R36S device tree routes the speaker to the codec's
+class D output (SPKO), and the codec's "Playback Mux" chooses between HP
+and SPK. On this console the speaker is not wired that way. These boots
+showed it:
+
+| Boot | Mux | Volume | Heard |
+|---|---|---|---|
+| boot-34 | SPK | -24 dB, left channel only | nothing |
+| boot-35 | SPK | 0 dB, both channels | nothing |
+| boot-36 | SPK, then HP | 0 dB | only the HP tone, very loud, with no headphones in |
+
+On boot-35 every DAPM widget of the speaker path was on (SPK DAC, Class
+D, SPKO), so the configuration was right and the class D output simply
+goes nowhere. The speaker is driven from the headphone outputs
+(HPOL/HPOR), through an amplifier on the board.
+
+So stage 2 leaves the mux on HP, which is the codec's default, and sets
+the volume to 191 of 255 (-24 dB). It plays a 440 Hz tone for 2 s
+(`sound.txt` in the logs). On boot-37 the level was right.
+
+The `Headphones Jack` control reads "on" with no headphones in, so the
+jack detection (`hp-det-gpios`, active high in the device tree) may be
+inverted. It does not matter for the speaker, which uses the same
+output. It needs checking with real headphones before slot relies on
+it.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,

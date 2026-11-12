@@ -13,7 +13,8 @@
 # /lightos tree (busybox and this script), plus Mesa, kmscube and ALSA.
 #
 # Then it
-#   0. in stage 2, runs kmscube for 10 s on the GPU (gpu.txt);
+#   0. in stage 2, runs kmscube for 10 s on the GPU (gpu.txt), then plays
+#      a tone on the speaker for 2 s (sound.txt);
 #   1. asks for each button in turn and logs its key code (keys.txt), then
 #      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
@@ -182,6 +183,32 @@ if [ $stage = 2 ] && command -v kmscube >/dev/null; then
   f=$(grep "^Rendered " $GPU | tail -n 1)
   say "GPU: kmscube from ${t0} s to $(up) s, ${r:-no renderer}, ${f:-no frames}"
   printf '\033[2J\033[H'
+fi
+
+# 0b. Sound, in stage 2: a 440 Hz tone for 2 s on the speaker. The card is
+# the rk817's ("rk817_int", a simple-audio-card in the R36S device tree).
+# This R36S's speaker is not on the codec's class D (SPKO): boot-34 to
+# boot-36 played on "Playback Mux" SPK with that whole path on and nothing
+# came out. It hangs off the headphone outputs (HPOL/HPOR) through an
+# amplifier on the board: boot-36's tone on HP, at 0 dB, was very loud
+# from the speaker, with no headphones in. So the mux stays on HP (the
+# codec's default) and the volume goes down: 191 of 255 is -24 dB.
+# The 'Headphones Jack' control said "on" without headphones in: the
+# jack detection is to be checked before anything relies on it.
+SND=/tmp/sound.txt
+: > $SND
+if [ $stage = 2 ] && command -v speaker-test >/dev/null; then
+  say "Sound: 440 Hz on the speaker, 2 s"
+  { echo "== aplay -l"; aplay -l
+    echo "== amixer contents"; amixer -c 0 contents
+    echo "== Playback Mux HP, Master Playback Volume 191 (-24 dB)"
+    amixer -c 0 cset name='Playback Mux' HP
+    amixer -c 0 cset name='Master Playback Volume' 191; } >> $SND 2>&1
+  t0=$(up)
+  timeout 2 speaker-test -D plughw:0,0 -t sine -f 440 -c 1 -r 48000 < /dev/null > /tmp/speaker-test.txt 2>&1
+  { echo "== speaker-test"; grep -vE "^$|xrun_recovery|Write error|Transfer failed" /tmp/speaker-test.txt
+    echo "== done, from ${t0} s to $(up) s"; } >> $SND
+  say "Sound: from ${t0} s to $(up) s, $(grep -m1 "^card 0" $SND || echo "no sound card, see sound.txt")"
 fi
 
 # 1. Buttons. With lightos/keytest on the card, guided: the screen asks for
@@ -386,6 +413,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $KEYS $dir/keys.txt
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
+  [ -s $SND ] && cp $SND $dir/sound.txt
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash
