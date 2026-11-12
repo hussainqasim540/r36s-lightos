@@ -684,9 +684,35 @@ frame, from `slot.log`:
 | First frame | 2.50 s | 2.21 s | 2.16 s |
 
 On boot-44 slot started at 1.98 s after the kernel, so its first frame
-came at 4.14 s. Of that, 2.16 s is slot's own start-up. Most of it is
-the faces and the UI, which slot draws on the CPU, and that is work for
-slot itself.
+came at 4.14 s. Of that, 2.16 s is slot's own start-up.
+
+The same build of slot on ArkOS reached its first frame in 1.61 s
+(`slot.log` on the ArkOS card). It drew its UI in 0.38 s, against 0.79 s
+on LightOS. The difference was the clocks. ArkOS runs the CPU at
+1512 MHz, LightOS at 1296 MHz. ArkOS also scales the DDR (its `dmc` was
+at 528 MHz). LightOS never did: ROCKNIX's U-Boot starts the DDR at
+333 MHz (rkbin's `rk3326_ddr_333MHz_v2.11.bin`), and `rk3326.dtsi` has
+the dmc node disabled. Only ROCKNIX's eeclone tree turns it on.
+
+`kernel/lightos-r36s.dtsi`, which `build_kernel.sh` includes at the end
+of the R36S tree, turns it on for LightOS's dtb. The driver is ROCKNIX's
+`px30_dmc`; BL31 makes the switch, with vdd_logic as its supply.
+Before slot starts, init sets every devfreq device to `performance`, as
+slot's ArkOS launcher does, so the DDR runs at 666 MHz and the GPU at
+560 MHz. boot-45:
+
+| | boot-44, DDR 333 MHz | boot-45, DDR 666 MHz | ArkOS |
+|---|---|---|---|
+| Surface | 0.39 s | 0.33 s | 0.05 s |
+| Compositor | 0.13 s | 0.11 s | 0.44 s |
+| Faces and bezel | 0.67 s | 0.52 s | 0.48 s |
+| UI faces | 0.79 s | 0.57 s | 0.38 s |
+| First frame | 2.16 s | 1.70 s | 1.61 s |
+
+slot started at 1.89 s after the kernel, so its first frame came at
+3.59 s. The DFI, which would measure the DDR's load for an ondemand
+governor, says "unsupported memory type 0x3". With `performance` it is
+not needed.
 
 ## Next steps
 

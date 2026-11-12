@@ -213,6 +213,12 @@ if [ $slot = yes ]; then
       printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -TERM $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
       chmod +x /tmp/slot-shims/$c
     done
+    # Full clocks while slot runs, as its ArkOS launcher does: performance
+    # for every devfreq device that has it (the DDR, the GPU).
+    for g in /sys/class/devfreq/*/governor; do
+      grep -qw performance ${g%governor}available_governors 2>/dev/null && echo performance > $g
+    done
+    say "slot: devfreq $(for d in /sys/class/devfreq/*; do echo -n "${d##*/} $(cat $d/governor) $(( $(cat $d/cur_freq) / 1000000 )) MHz; "; done)"
     amixer -q -c 0 cset name='Playback Mux' HP 2>/dev/null
     amixer -q -c 0 cset name='Master Playback Volume' 100% 2>/dev/null
     [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1

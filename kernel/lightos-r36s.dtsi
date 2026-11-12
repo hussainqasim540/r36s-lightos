@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * LightOS changes to ROCKNIX's R36S device tree (rk3326-gameconsole-r36s.dts),
+ * included at its end by tools/build_kernel.sh. The dtb is LightOS's own
+ * (lightos/rk3326-gameconsole-r36s.dtb); ROCKNIX keeps its own.
+ */
+
+/*
+ * DDR frequency scaling. ROCKNIX's U-Boot starts the DDR at 333 MHz
+ * (rkbin's rk3326_ddr_333MHz_v2.11.bin), and on the R36S the kernel never
+ * raised it: rk3326.dtsi has the dmc node disabled and only the eeclone's
+ * tree turns it on. ArkOS ran it at 528 MHz and up. With it at 333 MHz slot
+ * drew its UI in twice ArkOS's time (boot-44: 0.79 s against 0.38 s). The
+ * driver is ROCKNIX's px30_dmc (patches 036 and 037): BL31 changes the rate,
+ * with vdd_logic (the rk817's DCDC_REG1) for the voltage of each step of
+ * rk3326.dtsi's table, 194 to 666 MHz.
+ */
+&dmc {
+	center-supply = <&vdd_logic>;
+	status = "okay";
+};

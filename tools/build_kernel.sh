@@ -99,6 +99,12 @@ if [ "$(cat $src/.lightos-stamp 2>/dev/null)" != "$stamp" ]; then
 fi
 
 cd $src
+# The LightOS changes to the R36S tree, every time (the tree above is
+# only rebuilt when the patches change).
+d=arch/arm64/boot/dts/rockchip
+inc="#include \"lightos-r36s.dtsi\""
+cp /k/lightos-r36s.dtsi $d/
+grep -qxF "$inc" $d/rk3326-gameconsole-r36s.dts || echo "$inc" >> $d/rk3326-gameconsole-r36s.dts
 cp $D/linux/linux.aarch64.conf .config
 scripts/kconfig/merge_config.sh -m -Q .config /k/lightos.config > /w/merge.log 2>&1
 make -s olddefconfig
@@ -136,6 +142,7 @@ cp .config /o/config
   for p in $patches; do echo "  ${p#$R/}"; done
   echo "  + projects/ROCKNIX/packages/linux-drivers/generic-dsi/sources/panel-generic-dsi.c (obj-y)"
   echo "  + projects/ROCKNIX/devices/RK3326/linux/dts/ over arch/arm64/boot/dts/"
+  echo "  + kernel/lightos-r36s.dtsi, included at the end of rk3326-gameconsole-r36s.dts"
   echo "  + hackbar/rocknix-joypad $JOYPAD_VERSION rocknix-singleadc-joypad.c (obj-y)"
   echo "config: linux.aarch64.conf + kernel/lightos.config (sha256 $(sha256sum /k/lightos.config | cut -c1-16))"
   echo "built in: $(grep -c "=y$" .config) options, Image $(stat -c %s /o/Image) bytes"
