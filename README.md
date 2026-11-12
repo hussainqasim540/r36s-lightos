@@ -714,6 +714,14 @@ slot started at 1.89 s after the kernel, so its first frame came at
 governor, says "unsupported memory type 0x3". With `performance` it is
 not needed.
 
+The CPU at 1512 MHz did not boot. ArkOS's dtb has an `opp-1512000000`
+at 1.35 V, the same voltage as mainline's top OPP at 1296 MHz, and the
+same node in `lightos-r36s.dtsi` gave a black screen: no console text,
+no logs on the card, slot never started. The hang came before the
+panel was up, which is about when cpufreq takes the CPU to its top OPP.
+LightOS stays at 1296 MHz. With it, boot-47 had slot's first frame at
+1.65 s, slot having started at 1.90 s after the kernel.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
@@ -729,7 +737,8 @@ not needed.
    from `rkbin` comes later, on a card of its own, since the bench card
    keeps ROCKNIX's bootloader.
 3. Boot into slot from init in a few seconds, with clocks and the cpufreq
-   governor managed by slot: slot's first frame is at 4.1 s after the
-   kernel (boot-44), 2.2 s of it in slot's own start-up.
+   governor managed by slot: slot's first frame is at 3.6 s after the
+   kernel (boot-47), 1.65 s of it in slot's own start-up.
 4. Overclocking: extra OPPs for CPU, GPU and DDR in the device tree, tested one
-   step at a time.
+   step at a time. The DDR at 666 MHz works; the CPU at 1512 MHz and
+   1.35 V does not boot.
