@@ -6,7 +6,9 @@
 # mount namespaces. Three cases:
 #   none   no lightos/rootfs.sqfs: stage 1 goes on by itself;
 #   good   a root file system: init switches to it, logs say stage 2;
-#   bad    a damaged rootfs.sqfs: stage 1 goes on by itself.
+#   bad    a damaged rootfs.sqfs: stage 1 goes on by itself;
+#   trace  the root file system and lightos/gputrace: kmscube runs three
+#          times under strace first (only with out/rootfs/rootfs.sqfs).
 # The root file system is out/rootfs/rootfs.sqfs (tools/build_rootfs.sh) if
 # there is one, else the stage 1 tree with the stage 2 marker. The container
 # has no buttons and no USB device controller: init gets to the USB step,
@@ -44,7 +46,12 @@ run() {  # run CASE
   dd if=/dev/zero of=fat.img bs=1M count=$(( $(stat -c %s good.sqfs) / 1048576 + 32 )) status=none
   mkfs.vfat -n ROCKNIX fat.img >/dev/null
   mmd -i fat.img ::lightos
-  [ $1 = none ] || mcopy -i fat.img $1.sqfs ::lightos/rootfs.sqfs
+  case $1 in
+    none) ;;
+    trace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
+           : > gputrace; mcopy -i fat.img gputrace ::lightos/gputrace ;;
+    *) mcopy -i fat.img $1.sqfs ::lightos/rootfs.sqfs ;;
+  esac
   loop=$(losetup -f --show fat.img)
   mkdir -p /x; mount -t tmpfs tmpfs /x
   tar -xf /src/out/stage1.tar -C /x
@@ -54,7 +61,7 @@ run() {  # run CASE
   mkdir -p /mnt/$1; mount -o ro $loop /mnt/$1
   b=/mnt/$1/lightos/logs/boot-1
   echo "== $1: $(cat $b/os.txt 2>/dev/null || echo "no logs")"
-  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU" || true
+  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng" || true
   case $1 in
     good)
       check $1 "os.txt says stage 2" $b/os.txt "^LightOS stage 2"
@@ -64,10 +71,20 @@ run() {  # run CASE
       check $1 "logs on the FAT (rw)" $b/hardware.txt " /flash vfat rw"
       check $1 "reached the USB step" console-$1.txt "No USB device controller"
       if [ -f /src/out/rootfs/rootfs.sqfs ]; then
+        ls /mnt/$1/lightos/seed > seed-$1.txt 2>&1 || true
+        check $1 "init.txt: seedrng at the start" $b/init.txt "seedrng from"
+        check $1 "a creditable seed on the card" seed-$1.txt "seed.credit"
         # No GPU in Docker: kmscube has to start and fail on the DRM device.
         echo "    gpu.txt, last lines:"; tail -n 4 $b/gpu.txt | sed "s/^/      /"
         check $1 "gpu.txt: kmscube ran and exited" $b/gpu.txt "^== exit"
       fi ;;
+    trace)
+      check $1 "os.txt says stage 2" $b/os.txt "^LightOS stage 2"
+      check $1 "gpu.txt: three traced runs" $b/gpu.txt "^== trace 3"
+      check $1 "strace-1.txt in the logs" $b/strace-1.txt "execve"
+      check $1 "strace-3.txt in the logs" $b/strace-3.txt "execve"
+      check $1 "the 600 frames after them" $b/gpu.txt "^== kmscube"
+      check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
     *)
       check $1 "os.txt says stage 1" $b/os.txt "^LightOS stage 1"
       check $1 "/ is the initramfs" $b/hardware.txt "^tmpfs / tmpfs"
@@ -79,5 +96,6 @@ run() {  # run CASE
 run none
 run good
 run bad
+[ -f /src/out/rootfs/rootfs.sqfs ] && run trace
 [ $fails = 0 ] && echo "All checks passed." || { echo "$fails checks failed."; exit 1; }
 '

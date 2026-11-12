@@ -99,8 +99,26 @@ if [ $stage = 1 ] && mount -t vfat -o ro "$part" /flash; then
   umount /flash 2>/dev/null
 fi
 guided=no
-if mount -t vfat -o ro "$part" /flash; then
+gputrace=no
+# The kernel's random number generator: the RK3326 has no hardware RNG
+# the kernel uses, so it was ready ("crng init done") only 5.6 to 10 s
+# after power-on, and until then getrandom() blocks. Mesa's drirc parser
+# (expat, its hash salt) waited 3.5 s for it in kmscube (boot-32,
+# strace). In stage 2, seedrng (Buildroot's busybox) credits the seed
+# saved on the card at the previous boot and saves a new one; step 2 saves
+# it again once the generator is ready, so that the next boot can credit
+# it.
+seed=no
+[ $stage = 2 ] && command -v seedrng >/dev/null && seed=yes
+if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
+  [ -e /flash/lightos/gputrace ] && gputrace=yes
+  if [ $seed = yes ]; then
+    t0=$(up)
+    out=$(seedrng -d /flash/lightos/seed 2>&1 | tr '\n' ' ')
+    sync
+    say "seedrng from ${t0} s to $(up) s: ${out}"
+  fi
   umount /flash
 fi
 
@@ -109,19 +127,18 @@ fi
 # it prints (the EGL and GL renderer, the mode) goes to gpu.txt.
 GPU=/tmp/gpu.txt
 : > $GPU
-if [ $stage = 2 ] && command -v kmscube >/dev/null; then
-  say "GPU: kmscube, 600 frames"
-  { echo "== /sys/class/drm"; ls /sys/class/drm
-    echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20
-    echo "== kmscube"; } >> $GPU 2>&1
+# run_kmscube FRAMES [COMMAND...]: kmscube -c FRAMES, under COMMAND if one
+# is given (strace), at most 20 s.
+run_kmscube() {
+  n=$1; shift
   t0=$(up)
   # kmscube stops at the first input on its stdin ("user interrupted!",
   # boot-29 after 4.4 s, on the console): its stdin is a FIFO opened read
   # and write, which never has anything to read. (Not a pipe from sleep:
   # ash's wait would then wait for the sleep too.) Mesa's shader cache goes
   # to /tmp (the root is read-only).
-  mkfifo /tmp/kmscube.in
-  XDG_CACHE_HOME=/tmp/cache kmscube -c 600 <> /tmp/kmscube.in >> $GPU 2>&1 &
+  [ -p /tmp/kmscube.in ] || mkfifo /tmp/kmscube.in
+  XDG_CACHE_HOME=/tmp/cache "$@" kmscube -c $n <> /tmp/kmscube.in >> $GPU 2>&1 &
   k=$!
   i=0
   while kill -0 $k 2>/dev/null && [ $i -lt 200 ]; do
@@ -130,10 +147,35 @@ if [ $stage = 2 ] && command -v kmscube >/dev/null; then
   done
   if kill -0 $k 2>/dev/null; then
     kill $k
+    # strace, killed, leaves kmscube running: it would keep the display.
+    killall kmscube 2>/dev/null
     echo "== killed after 20 s" >> $GPU
   fi
   wait $k
   echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
+}
+if [ $stage = 2 ] && command -v kmscube >/dev/null; then
+  { echo "== /sys/class/drm"; ls /sys/class/drm
+    echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20; } >> $GPU 2>&1
+  # With lightos/gputrace on the card: where kmscube's first 4.8 s go
+  # (boot-31: 14.8 s for 10 s of frames). Three runs of 120 frames under
+  # strace (-ttt -T: each system call's time and length), in the logs as
+  # strace-N.txt: everything cold; again, with Mesa's shader cache and the
+  # files in the page cache; again after dropping the page cache, so the
+  # libraries are read from the squashfs again but the shader cache is warm.
+  if [ $gputrace = yes ] && command -v strace >/dev/null; then
+    say "GPU trace: kmscube under strace, three runs"
+    for t in 1 2 3; do
+      if [ $t = 3 ]; then sync; echo 3 > /proc/sys/vm/drop_caches; fi
+      echo "== trace $t" >> $GPU
+      run_kmscube 120 strace -f -ttt -T -o /tmp/strace-$t.txt
+    done
+    { echo "== /tmp/cache"; du -a /tmp/cache; } >> $GPU 2>&1
+    say "GPU trace: $(grep -c "" /tmp/strace-1.txt) system calls in run 1, done at $(up) s"
+  fi
+  say "GPU: kmscube, 600 frames"
+  echo "== kmscube" >> $GPU
+  run_kmscube 600
   # kmscube prints 'renderer: "Mali-G31 MC1 (Panfrost)"' and, every 2 s
   # and at the end, "Rendered N frames in T sec (F fps)".
   r=$(sed -n 's/^ *renderer: "\(.*\)"$/\1/p' $GPU | head -n 1)
@@ -335,12 +377,16 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   else
     echo "LightOS stage 1 (busybox initramfs on $kernel $(uname -r))" > $dir/os.txt
   fi
+  if [ $seed = yes ]; then
+    say "seedrng: $(seedrng -d /flash/lightos/seed 2>&1 | tr '\n' ' ')$(dmesg | grep -m1 "crng init done" | sed 's/^/(kernel: /; s/$/)/')"
+  fi
   hardware > $dir/hardware.txt 2>&1
   dmesg > $dir/dmesg.txt
   cp $LOG $dir/init.txt
   cp $KEYS $dir/keys.txt
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
+  for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash
 else

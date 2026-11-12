@@ -39,3 +39,6 @@ BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_TARGET_ROOTFS_SQUASHFS=y
 BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
 # BR2_TARGET_ROOTFS_TAR is not set
+
+# strace: kmscube start-up timing on the console (lightos/gputrace).
+BR2_PACKAGE_STRACE=y

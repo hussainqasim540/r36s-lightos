@@ -567,12 +567,55 @@ without tearing, and gpu.txt ends with "Rendered 599 frames in 9.994 sec
 vsync, and none was dropped. kmscube exits with 0.
 
 The whole step took 14.8 s, from 2.35 s to 17.12 s. Drawing took 10 s,
-so about 4.8 s went before the first frame. That time is not measured
-yet: it could be loading Mesa, compiling the shaders with an empty
-cache (in `/tmp`, empty on every boot), or the first mode set. On
-boot-31 init itself started at 1.60 s, not 1.03 s: the SD card's probe
-(mmc1) took 0.93 s ("Busy; trying anyway"), so the card's reset time
-varies from boot to boot.
+so about 4.8 s went before the first frame. On boot-31 init itself
+started at 1.60 s, not 1.03 s: the SD card's probe (mmc1) took 0.93 s
+("Busy; trying anyway"), so the card's reset time varies from boot to
+boot.
+
+### Where kmscube's 4.8 s went: the random number generator
+
+With a file `lightos/gputrace` on the card, stage 2 first runs kmscube
+three times for 120 frames under `strace -f -ttt -T` (in the root file
+system for this), and the boot's logs get `strace-1.txt` to
+`strace-3.txt`:
+
+1. everything cold;
+2. again, with the files in the page cache and Mesa's shader cache
+   filled;
+3. again after `drop_caches`, so the libraries come from the squashfs
+   again.
+
+On boot-32, the first frame came after 4.37 s, 0.49 s and 0.83 s. Of the
+first run's 4.37 s, 3.54 s was a single `getrandom(16 bytes, 0)`. Mesa
+reads its `drirc` with expat, which takes a hash salt from glibc's
+`arc4random`, and that call blocks until the kernel's random number
+generator is ready. That was late on every boot: "crng init done" came at
+5.6 to 10 s. The RK3326 has no hardware RNG the kernel uses (no node in
+`px30.dtsi`, and `rockchip-rng` starts at the RK3568), and ROCKNIX's
+U-Boot passes no seed. Reading Mesa from the squashfs costs about
+0.35 s; the GPU and the mode set are quick. slot, or anything else that
+asks for random bytes early, would have waited the same way.
+
+The fix is a seed kept on the card, as `seedrng` does on other systems:
+
+- early in stage 2, init runs busybox's `seedrng` (Buildroot's busybox,
+  in the root file system) on `lightos/seed`. It credits the seed saved at
+  the previous boot and writes a new one.
+- When it writes the logs, init runs `seedrng` again. The generator is
+  ready by then, so the seed is creditable for the next boot.
+
+Without a seed, the first boot waits as before. The first seed on the
+card came from the Mac's `/dev/urandom`. The seed is on the FAT
+partition, so anyone with the card can read it. For a game console that
+is acceptable.
+
+boot-33 shows the result:
+
+- seedrng takes 0.09 s;
+- "crng init done" comes at 2.39 s;
+- the GPU step goes from 14.8 s to 10.6 s, so the first frame now
+  comes about 0.6 s after kmscube starts, cold;
+- 599 frames at 59.94 fps, as before.
 
 ## Next steps
 
