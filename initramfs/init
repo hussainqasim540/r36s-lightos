@@ -134,7 +134,11 @@ if [ $stage = 2 ] && command -v kmscube >/dev/null; then
   fi
   wait $k
   echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
-  say "GPU: kmscube from ${t0} s to $(up) s, $(grep -m1 -i "GL_RENDERER" $GPU || echo "no GL_RENDERER, see gpu.txt")"
+  # kmscube prints 'renderer: "Mali-G31 MC1 (Panfrost)"' and, every 2 s
+  # and at the end, "Rendered N frames in T sec (F fps)".
+  r=$(sed -n 's/^ *renderer: "\(.*\)"$/\1/p' $GPU | head -n 1)
+  f=$(grep "^Rendered " $GPU | tail -n 1)
+  say "GPU: kmscube from ${t0} s to $(up) s, ${r:-no renderer}, ${f:-no frames}"
   printf '\033[2J\033[H'
 fi
 

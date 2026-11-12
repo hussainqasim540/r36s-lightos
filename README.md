@@ -545,6 +545,35 @@ EGL, GLESv2, GBM, kmscube, modetest and ALSA. It has no LLVM. In
 `test_init_stages.sh` this root file system reaches stage 2, and kmscube
 starts and exits on finding no DRM device (Docker has no GPU).
 
+### On the console
+
+boot-29 (12 November) was the first boot into stage 2. init started at
+1.03 s, the copy of `rootfs.sqfs` (9.3 MB) took 0.55 s, and stage 2
+started at 1.69 s. Panfrost found the Mali-G31 (id 0x7093) and Mesa
+reported `Mali-G31 MC1 (Panfrost)`, OpenGL ES 3.1, Mesa 26.0.1, on DSI-1
+at 640x480, 59.94 Hz. Then kmscube stopped after 4.4 s with "user
+interrupted!" before drawing a frame: in its default mode it quits as
+soon as its stdin is readable, and its stdin was the console. Two fixes
+followed:
+
+- **A pipe from `sleep`.** kmscube ran, but ash's `wait` also waited for
+  the `sleep`: in Docker the GPU step took 25 s.
+- **A FIFO opened read and write** (`<>`). It never has anything to read,
+  and no second process runs. This is what init does now.
+
+boot-31 is the FIFO version. The cube drew on the panel, smoothly and
+without tearing, and gpu.txt ends with "Rendered 599 frames in 9.994 sec
+(59.93 fps)". That is the panel's refresh rate: each frame waits for
+vsync, and none was dropped. kmscube exits with 0.
+
+The whole step took 14.8 s, from 2.35 s to 17.12 s. Drawing took 10 s,
+so about 4.8 s went before the first frame. That time is not measured
+yet: it could be loading Mesa, compiling the shaders with an empty
+cache (in `/tmp`, empty on every boot), or the first mode set. On
+boot-31 init itself started at 1.60 s, not 1.03 s: the SD card's probe
+(mmc1) took 0.93 s ("Busy; trying anyway"), so the card's reset time
+varies from boot to boot.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
