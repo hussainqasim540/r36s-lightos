@@ -13,9 +13,10 @@
 # /lightos tree (busybox and this script), plus Mesa, kmscube and ALSA.
 #
 # Then it
-#   0. in stage 2, runs kmscube for 10 s on the GPU (gpu.txt), then plays
-#      a tone on the speaker for 2 s (sound.txt);
-#   1. asks for each button in turn and logs its key code (keys.txt), then
+#   0. in stage 2 without slot, runs kmscube for 10 s on the GPU
+#      (gpu.txt);
+#   1. starts slot, if the card has it in slot/; or else
+#      asks for each button in turn and logs its key code (keys.txt), then
 #      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
@@ -101,6 +102,7 @@ if [ $stage = 1 ] && mount -t vfat -o ro "$part" /flash; then
 fi
 guided=no
 gputrace=no
+slot=no
 # The kernel's random number generator: the RK3326 has no hardware RNG
 # the kernel uses, so it was ready ("crng init done") only 5.6 to 10 s
 # after power-on, and until then getrandom() blocks. Mesa's drirc parser
@@ -114,6 +116,10 @@ seed=no
 if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
   [ -e /flash/lightos/gputrace ] && gputrace=yes
+  # slot (its R36S build, dist-r36s/slot of slot-r36s) in slot/ on the
+  # FAT partition: stage 2 starts it in place of the self-tests and the
+  # button test, unless the card holds lightos/keytest or lightos/noslot.
+  [ $stage = 2 ] && [ $guided = no ] && [ -f /flash/slot/System/slot ] && [ ! -e /flash/lightos/noslot ] && slot=yes
   if [ $seed = yes ]; then
     t0=$(up)
     out=$(seedrng -d /flash/lightos/seed 2>&1 | tr '\n' ' ')
@@ -155,7 +161,7 @@ run_kmscube() {
   wait $k
   echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
 }
-if [ $stage = 2 ] && command -v kmscube >/dev/null; then
+if [ $stage = 2 ] && [ $slot = no ] && command -v kmscube >/dev/null; then
   { echo "== /sys/class/drm"; ls /sys/class/drm
     echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20; } >> $GPU 2>&1
   # With lightos/gputrace on the card: where kmscube's first 4.8 s go
@@ -185,150 +191,127 @@ if [ $stage = 2 ] && command -v kmscube >/dev/null; then
   printf '\033[2J\033[H'
 fi
 
-# 0b. Sound, in stage 2: a 440 Hz tone for 2 s on the speaker. The card is
-# the rk817's ("rk817_int", a simple-audio-card in the R36S device tree).
-# This R36S's speaker is not on the codec's class D (SPKO): boot-34 to
-# boot-36 played on "Playback Mux" SPK with that whole path on and nothing
-# came out. It hangs off the headphone outputs (HPOL/HPOR) through an
-# amplifier on the board: boot-36's tone on HP, at 0 dB, was very loud
-# from the speaker, with no headphones in. So the mux stays on HP (the
-# codec's default) and the volume goes down: 191 of 255 is -24 dB.
-# The 'Headphones Jack' control said "on" without headphones in: the
-# jack detection is to be checked before anything relies on it.
-SND=/tmp/sound.txt
-: > $SND
-if [ $stage = 2 ] && command -v speaker-test >/dev/null; then
-  say "Sound: 440 Hz on the speaker, 2 s"
-  { echo "== aplay -l"; aplay -l
-    echo "== amixer contents"; amixer -c 0 contents
-    echo "== Playback Mux HP, Master Playback Volume 191 (-24 dB)"
-    amixer -c 0 cset name='Playback Mux' HP
-    amixer -c 0 cset name='Master Playback Volume' 191; } >> $SND 2>&1
-  t0=$(up)
-  timeout 2 speaker-test -D plughw:0,0 -t sine -f 440 -c 1 -r 48000 < /dev/null > /tmp/speaker-test.txt 2>&1
-  { echo "== speaker-test"; grep -vE "^$|xrun_recovery|Write error|Transfer failed" /tmp/speaker-test.txt
-    echo "== done, from ${t0} s to $(up) s"; } >> $SND
-  say "Sound: from ${t0} s to $(up) s, $(grep -m1 "^card 0" $SND || echo "no sound card, see sound.txt")"
+# 1a. slot, instead of the button test (see slot=yes above). Its card
+# folder is slot/ on the FAT partition, mounted read-write for as long as
+# it runs; its log is slot/Logs/slot.log, and the boot's logs get a copy.
+# The environment is the one slot's ArkOS launcher (r36s/card/System/
+# r36s-launch.sh) sets. slot sets the volume itself, in software, so the
+# codec goes to full. This R36S's speaker is on the codec's headphone
+# output (HP), not on its class D (SPK): boot-34 to boot-36 played a tone
+# on each, and only HP came out of the speaker.
+# slot powers off with poweroff(8) and restarts with reboot(8): here both
+# end slot, init writes which one it asked for, and goes on with the logs
+# and the USB disk, then reboots.
+SLOT=/flash/slot
+if [ $slot = yes ]; then
+  if mount -t vfat -o rw,noatime "$part" /flash; then
+    mountpoint -q /run || mount -t tmpfs tmpfs /run
+    mkdir -p /tmp/data /tmp/cache /tmp/slot-shims $SLOT/Logs
+    for c in poweroff reboot; do
+      printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -TERM $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
+      chmod +x /tmp/slot-shims/$c
+    done
+    amixer -q -c 0 cset name='Playback Mux' HP 2>/dev/null
+    amixer -q -c 0 cset name='Master Playback Volume' 100% 2>/dev/null
+    [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1
+    t0=$(up)
+    say "slot: started at ${t0} s"
+    PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/tmp/cache \
+      SLOT_ROOT=$SLOT SLOT_RUN=/run BASEOS_TARGET=r36s BASEOS_MODEL=R36S \
+      SLOT_GBA_CORE=gpsp SLOT_PACER=off \
+      $SLOT/System/slot < /dev/null > $SLOT/Logs/slot.log 2>&1
+    st=$?
+    say "slot: exited with $st at $(up) s$([ -f /tmp/slot-exit ] && echo ", after asking for $(cat /tmp/slot-exit)")"
+    cp $SLOT/Logs/slot.log /tmp/slot.log
+    sync
+    umount /flash
+  else
+    say "slot: could not mount $part read-write"
+  fi
+  printf '\033[2J\033[H'
 fi
 
-# 1. Buttons. With lightos/keytest on the card, guided: the screen asks for
-# one button at a time, in the order below, and keys.txt gets the key code
-# and device each one sent; a step with no press for STEP_SECONDS is
-# skipped. Then (or straight away, without keytest) any button shows on the
-# screen until KEYS_MIN_SECONDS from the start. POWER comes last: nothing in
-# LightOS acts on KEY_POWER, but holding it powers off (the PMIC). RESET is
-# a hardware reset and is not asked for.
-STEPS='D-pad up
-D-pad right
-D-pad down
-D-pad left
-X
-A
-B
-Y
-L1
-L2
-R2
-R1
-FN
-START
-SELECT
-Left stick, pressed
-Right stick, pressed
-Volume +
-Volume -
-POWER, short press only, do not hold it'
-STEP_SECONDS=30
-KEYS_MIN_SECONDS=10
-[ $guided = yes ] && KEYS_MIN_SECONDS=120
-RAW=/tmp/keys-raw.txt
-KEYS=/tmp/keys.txt
-: > $RAW
-: > $KEYS
-secs() { cut -d. -f1 /proc/uptime; }
-lines() { wc -l < $RAW; }
-
-# One reader per input device; an evdev read returns whole 24-byte events:
-# time (16), type, code (u16), value (s32). Presses (EV_KEY 1, value 1) go
-# to $RAW as "uptime code device".
-say ""
-readers=
-for ev in /dev/input/event*; do
-  [ -c "$ev" ] || continue
-  name=$(cat /sys/class/input/${ev##*/}/device/name 2>/dev/null)
-  say "  ${ev##*/}: $name"
-  (
-    while :; do
-      set -- $(dd if=$ev bs=24 count=1 2>/dev/null | od -An -tu2)
-      [ $# -ge 11 ] || exit 0
-      [ "$9" = 1 ] && [ "${11}" = 1 ] && echo "$(up) ${10} $name" >> $RAW
-    done
-  ) &
-  readers="$readers $!"
-done
-sleep 2
-
-t_keys=$(secs)
-n_steps=$(echo "$STEPS" | wc -l)
-i=0
-[ $guided = yes ] || STEPS=
-while read -r step; do
-  [ -n "$step" ] || continue
-  i=$((i + 1))
-  seen=$(lines)
-  printf '\033[2J\033[H'
-  echo "LightOS button test: $i of $n_steps"
-  echo ""
-  echo "    Press:  $step"
-  echo ""
-  echo "($STEP_SECONDS s for each button; wait to skip one)"
-  echo ""
-  tail -n 18 $KEYS
-  got=
-  tick=0
-  while [ $tick -lt $((STEP_SECONDS * 10)) ]; do
-    if [ "$(lines)" -gt "$seen" ]; then
-      got=$(sed -n "$((seen + 1))p" $RAW)
-      break
-    fi
-    usleep 100000
-    tick=$((tick + 1))
+# 1b. The button test, when slot does not run.
+if [ $slot = no ]; then
+  say ""
+  readers=
+  for ev in /dev/input/event*; do
+    [ -c "$ev" ] || continue
+    name=$(cat /sys/class/input/${ev##*/}/device/name 2>/dev/null)
+    say "  ${ev##*/}: $name"
+    (
+      while :; do
+        set -- $(dd if=$ev bs=24 count=1 2>/dev/null | od -An -tu2)
+        [ $# -ge 11 ] || exit 0
+        [ "$9" = 1 ] && [ "${11}" = 1 ] && echo "$(up) ${10} $name" >> $RAW
+      done
+    ) &
+    readers="$readers $!"
   done
-  if [ -n "$got" ]; then
-    set -- $got
-    shift
-    code=$1
-    shift
-    echo "$step: $code ($*)" >> $KEYS
-  else
-    echo "$step: not pressed" >> $KEYS
-  fi
-  # Anything else that came with that press (bounce) is not the next step.
-  usleep 300000
-done <<EOF_STEPS
+  sleep 2
+
+  t_keys=$(secs)
+  n_steps=$(echo "$STEPS" | wc -l)
+  i=0
+  [ $guided = yes ] || STEPS=
+  while read -r step; do
+    [ -n "$step" ] || continue
+    i=$((i + 1))
+    seen=$(lines)
+    printf '\033[2J\033[H'
+    echo "LightOS button test: $i of $n_steps"
+    echo ""
+    echo "    Press:  $step"
+    echo ""
+    echo "($STEP_SECONDS s for each button; wait to skip one)"
+    echo ""
+    tail -n 18 $KEYS
+    got=
+    tick=0
+    while [ $tick -lt $((STEP_SECONDS * 10)) ]; do
+      if [ "$(lines)" -gt "$seen" ]; then
+        got=$(sed -n "$((seen + 1))p" $RAW)
+        break
+      fi
+      usleep 100000
+      tick=$((tick + 1))
+    done
+    if [ -n "$got" ]; then
+      set -- $got
+      shift
+      code=$1
+      shift
+      echo "$step: $code ($*)" >> $KEYS
+    else
+      echo "$step: not pressed" >> $KEYS
+    fi
+    # Anything else that came with that press (bounce) is not the next step.
+    usleep 300000
+  done <<EOF_STEPS
 $STEPS
 EOF_STEPS
 
-printf '\033[2J\033[H'
-cat $KEYS
-echo ""
-echo "Free test: any button shows here until $KEYS_MIN_SECONDS s."
-seen=$(lines)
-while [ $(( $(secs) - t_keys )) -lt $KEYS_MIN_SECONDS ]; do
-  now=$(lines)
-  if [ "$now" -gt "$seen" ]; then
-    sed -n "$((seen + 1)),${now}p" $RAW | while read -r t code dev; do
-      echo "  key $code on $dev"
-    done
-    seen=$now
-  fi
-  usleep 200000
-done
-kill $readers 2>/dev/null
-killall dd 2>/dev/null
-printf '\033[2J\033[H'
-say "Button test done ($(( $(secs) - t_keys )) s)."
-cat $KEYS >> $LOG
+  printf '\033[2J\033[H'
+  cat $KEYS
+  echo ""
+  echo "Free test: any button shows here until $KEYS_MIN_SECONDS s."
+  seen=$(lines)
+  while [ $(( $(secs) - t_keys )) -lt $KEYS_MIN_SECONDS ]; do
+    now=$(lines)
+    if [ "$now" -gt "$seen" ]; then
+      sed -n "$((seen + 1)),${now}p" $RAW | while read -r t code dev; do
+        echo "  key $code on $dev"
+      done
+      seen=$now
+    fi
+    usleep 200000
+  done
+  kill $readers 2>/dev/null
+  killall dd 2>/dev/null
+  printf '\033[2J\033[H'
+  say "Button test done ($(( $(secs) - t_keys )) s)."
+  cat $KEYS >> $LOG
+fi
 
 # 2. Logs on the FAT partition.
 
@@ -413,7 +396,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $KEYS $dir/keys.txt
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
-  [ -s $SND ] && cp $SND $dir/sound.txt
+  [ -f /tmp/slot.log ] && cp /tmp/slot.log $dir/slot.log
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash

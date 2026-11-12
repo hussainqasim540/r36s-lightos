@@ -10,4 +10,7 @@ stage1=$BR2_EXTERNAL_LIGHTOS_PATH/../out/stage1.tar
 rm -rf "$target/lightos"
 tar -xf "$stage1" -C "$target"
 mkdir -p "$target/flash"
+# slot writes /data/slot-card.log and /data/slot-repair.result; the root is
+# read-only, so /data is a link to a folder init makes in /tmp.
+ln -sfn /tmp/data "$target/data"
 echo "LightOS stage 2: Buildroot root file system (version in /etc/os-release)" > "$target/lightos/stage2"

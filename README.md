@@ -636,9 +636,10 @@ D, SPKO), so the configuration was right and the class D output simply
 goes nowhere. The speaker is driven from the headphone outputs
 (HPOL/HPOR), through an amplifier on the board.
 
-So stage 2 leaves the mux on HP, which is the codec's default, and sets
-the volume to 191 of 255 (-24 dB). It plays a 440 Hz tone for 2 s
-(`sound.txt` in the logs). On boot-37 the level was right.
+So the mux stays on HP, which is the codec's default. On boot-37 a 2 s
+tone at 191 of 255 (-24 dB) came out at the right level. After that the
+tone was taken out of the boot: slot now plays the sound, with the codec
+at full and its own volume in software.
 
 The `Headphones Jack` control reads "on" with no headphones in, so the
 jack detection (`hp-det-gpios`, active high in the device tree) may be
