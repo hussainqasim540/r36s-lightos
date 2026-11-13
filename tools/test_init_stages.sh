@@ -20,7 +20,13 @@
 #          before anything else;
 #   realslot  slot's own R36S build (SLOT_DIST, by default
 #          ~/dev/slot-r36s/dist-r36s/slot, if it is there): it has to load
-#          its libraries and stop on finding no display.
+#          its libraries and stop on finding no display;
+#   vesper  lightos/frontend says "vesper" and a stand-in vesper/bin/vesper
+#          asks for poweroff: init starts it with VESPER_ROOT, its poweroff
+#          ends it, and slot (also on the card) does not run;
+#   realvesper  Vesper's own build (VESPER_DIST, by default
+#          ~/dev/r36s-handheld/build/card/vesper, if it is there): it has to
+#          load its libraries and stop on finding no display.
 # The root file system is out/rootfs/rootfs.sqfs (tools/build_rootfs.sh) if
 # there is one, else the stage 1 tree with the stage 2 marker. The container
 # has no buttons and no USB device controller. Init ends with poweroff -f
@@ -38,6 +44,8 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 SLOT_DIST=${SLOT_DIST:-$HOME/dev/slot-r36s/dist-r36s/slot}
 slot_mount=
 [ -f "$SLOT_DIST/System/slot" ] && slot_mount="-v $SLOT_DIST:/slot:ro"
+VESPER_DIST=${VESPER_DIST:-$HOME/dev/r36s-handheld/build/card/vesper}
+[ -f "$VESPER_DIST/bin/vesper" ] && slot_mount="$slot_mount -v $VESPER_DIST:/vesper:ro"
 docker run --rm --privileged -v "$here:/src:ro" $slot_mount debian:trixie bash -euc '
 apt-get update -qq && apt-get install -y -qq squashfs-tools dosfstools mtools util-linux >/dev/null 2>&1
 w=/work; mkdir -p $w; cd $w
@@ -64,8 +72,11 @@ lacks() {  # lacks NAME WHAT FILE PATTERN: the file has no such line
 ends() {  # ends CASE: how init ended, on its console
   c=console-$1.txt
   case $1 in
-    slot|slottrace)
-      check $1 "powered off at once, as slot asked" $c "^poweroff\.$"
+    slot|slottrace|vesper)
+      check $1 "powered off at once, as the frontend asked" $c "^poweroff\.$"
+      lacks $1 "no USB disk" $c "USB device controller\|OTG" ;;
+    realvesper)
+      check $1 "without Vesper asking: poweroff after 10 s" $c "Stopped without vesper asking to: poweroff in 10 s"
       lacks $1 "no USB disk" $c "USB device controller\|OTG" ;;
     usbdisk)
       check $1 "reached the USB step (lightos/usbdisk)" $c "No USB device controller" ;;
@@ -92,6 +103,17 @@ run() {  # run CASE
           mcopy -s -i fat.img fake ::slot ;;
     realslot) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
           mcopy -s -i fat.img /slot ::slot ;;
+    vesper) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
+          printf "vesper\r\n" > frontend; mcopy -i fat.img frontend ::lightos/frontend
+          mkdir -p fakev/bin fake/System
+          printf "#!/bin/sh\necho \"stand-in vesper, root \$VESPER_ROOT, slot root \${SLOT_ROOT:-none}\"\nsleep 5\npoweroff\nsleep 30\necho not stopped\n" > fakev/bin/vesper
+          printf "#!/bin/sh\necho slot ran\n" > fake/System/slot
+          chmod +x fakev/bin/vesper fake/System/slot
+          mcopy -s -i fat.img fakev ::vesper
+          mcopy -s -i fat.img fake ::slot ;;
+    realvesper) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
+          echo vesper > frontend; mcopy -i fat.img frontend ::lightos/frontend
+          mcopy -s -i fat.img /vesper ::vesper ;;
     *) mcopy -i fat.img $1.sqfs ::lightos/rootfs.sqfs ;;
   esac
   loop=$(losetup -f --show fat.img)
@@ -120,7 +142,7 @@ run() {  # run CASE
     umount /mnt/$1; losetup -d $loop
     return
   fi
-  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng|slot:" || true
+  sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng|slot:|vesper:" || true
   case $1 in
     good)
       check $1 "os.txt says stage 2" $b/os.txt "^LightOS stage 2"
@@ -170,6 +192,20 @@ run() {  # run CASE
     usbdisk)
       check $1 "init.txt: slot ended by its poweroff" $b/init.txt "after asking for poweroff"
       ends $1 ;;
+    vesper)
+      check $1 "init.txt: vesper started" $b/init.txt "vesper: started"
+      check $1 "init.txt: vesper ended by its poweroff" $b/init.txt "vesper: exited.*after asking for poweroff"
+      check $1 "vesper.log: VESPER_ROOT, no slot variables" $b/vesper.log "root /flash/vesper, slot root none"
+      lacks $1 "vesper.log: its poweroff stopped it" $b/vesper.log "not stopped"
+      lacks $1 "slot did not run" $b/init.txt "slot: started"
+      check $1 "vesper/logs/vesper.log: copied from /tmp" /mnt/$1/vesper/logs/vesper.log "stand-in vesper"
+      ends $1 ;;
+    realvesper)
+      echo "    vesper.log:"; sed "s/^/      /" $b/vesper.log | head -n 12
+      check $1 "init.txt: vesper started and exited" $b/init.txt "vesper: exited"
+      check $1 "vesper.log: Vesper ran (no loader error)" $b/vesper.log "^vesper: root /flash/vesper"
+      check $1 "vesper.log: it stopped on finding no display" $b/vesper.log "^vesper: no display"
+      ends $1 ;;
     realslot)
       echo "    slot.log:"; sed "s/^/      /" $b/slot.log | head -n 12
       check $1 "init.txt: slot started and exited" $b/init.txt "slot: exited"
@@ -193,5 +229,7 @@ run bad
 [ -f /src/out/rootfs/rootfs.sqfs ] && run usbdisk
 run volheld
 [ -f /src/out/rootfs/rootfs.sqfs ] && [ -f /slot/System/slot ] && run realslot
+[ -f /src/out/rootfs/rootfs.sqfs ] && run vesper
+[ -f /src/out/rootfs/rootfs.sqfs ] && [ -f /vesper/bin/vesper ] && run realvesper
 [ $fails = 0 ] && echo "All checks passed." || { echo "$fails checks failed."; exit 1; }
 '

@@ -14,28 +14,29 @@
 # /lightos tree (busybox and this script), plus Mesa, kmscube and ALSA.
 #
 # Then it
-#   0. in stage 2 without slot, runs kmscube for 10 s on the GPU
+#   0. in stage 2 without a frontend, runs kmscube for 10 s on the GPU
 #      (gpu.txt);
-#   1. starts slot, if the card has it in slot/; or else
+#   1. starts the frontend, if the card has it: slot in slot/, or Vesper
+#      in vesper/ when lightos/frontend says "vesper"; or else
 #      asks for each button in turn and logs its key code (keys.txt), then
 #      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
-#   3. powers off, or reboots, as slot asked, at once. If slot stopped
-#      by itself, or there is none, it says so for 10 s and powers off (a
-#      reboot could loop).
+#   3. powers off, or reboots, as the frontend asked, at once. If it
+#      stopped by itself, or there is none, it says so for 10 s and powers
+#      off (a reboot could loop).
 # With lightos/usbdisk on the card (development), step 3 first shares that
 # partition over the OTG port, like "LightOS SD via USB", and goes on when
-# the computer ejects the card, or when no computer came: after slot within
-# WAIT_PLUG s, otherwise within WAIT_HOST s; without slot's word it then
-# reboots.
+# the computer ejects the card, or when no computer came: after the
+# frontend within WAIT_PLUG s, otherwise within WAIT_HOST s; without its
+# word it then reboots.
 # U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT
 # (boot.ini). VOL- held at power-on writes one: stage 1 checks the key as
 # soon as it finds the FAT partition, writes ROCKNIX.TXT and reboots.
 #
 # With the boot logo in the initramfs (lightos/splash.fb.gz, from
 # tools/lume_logo.py), stage 1 draws it on the frame buffer and the console
-# stays quiet (the log keeps every line) until slot draws, or until a step
+# stays quiet (the log keeps every line) until the frontend draws, or until a step
 # that needs the screen: the button test, kmscube, the USB disk.
 #
 # If this script stops, the kernel panics and panic=10 reboots.
@@ -174,7 +175,8 @@ if [ $stage = 1 ] && mount -t vfat -o ro "$part" /flash; then
 fi
 guided=no
 gputrace=no
-slot=no
+fe=slot
+fe_run=no
 slottrace=no
 usbdisk=no
 # The kernel's random number generator: the RK3326 has no hardware RNG
@@ -195,10 +197,18 @@ if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfa
     slottrace=yes
     read traceafter < /flash/lightos/slottrace
   fi
-  # slot (its R36S build, dist-r36s/slot of slot-r36s) in slot/ on the
-  # FAT partition: stage 2 starts it in place of the self-tests and the
-  # button test, unless the card holds lightos/keytest or lightos/noslot.
-  [ $stage = 2 ] && [ $guided = no ] && [ -f /flash/slot/System/slot ] && [ ! -e /flash/lightos/noslot ] && slot=yes
+  # The frontend: slot (its R36S build, dist-r36s/slot of slot-r36s) in
+  # slot/ on the FAT partition, or Vesper (build/card/vesper of
+  # r36s-handheld) in vesper/ when lightos/frontend holds "vesper". Stage
+  # 2 starts it in place of the self-tests and the button test, unless the
+  # card holds lightos/keytest or lightos/noslot (which stops either).
+  # Its first word; a file saved on Windows may end its lines with CR.
+  [ -f /flash/lightos/frontend ] && fe=$(head -n 1 /flash/lightos/frontend | tr -d "\r" | cut -d" " -f1)
+  case $fe in
+    vesper) fe_bin=bin/vesper fe_logs=logs ;;
+    *) fe=slot fe_bin=System/slot fe_logs=Logs ;;
+  esac
+  [ $stage = 2 ] && [ $guided = no ] && [ -f /flash/$fe/$fe_bin ] && [ ! -e /flash/lightos/noslot ] && fe_run=yes
   if [ $seed = yes ]; then
     t0=$(up)
     out=$(seedrng -d /flash/lightos/seed 2>&1 | tr '\n' ' ')
@@ -240,7 +250,7 @@ run_kmscube() {
   wait $k
   echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
 }
-if [ $stage = 2 ] && [ $slot = no ] && command -v kmscube >/dev/null; then
+if [ $stage = 2 ] && [ $fe_run = no ] && command -v kmscube >/dev/null; then
   loud
   { echo "== /sys/class/drm"; ls /sys/class/drm
     echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20; } >> $GPU 2>&1
@@ -271,17 +281,20 @@ if [ $stage = 2 ] && [ $slot = no ] && command -v kmscube >/dev/null; then
   printf '\033[2J\033[H'
 fi
 
-# 1a. slot, instead of the button test (see slot=yes above). Its card
-# folder is slot/ on the FAT partition, mounted read-write for as long as
-# it runs; its log is slot/Logs/slot.log, and the boot's logs get a copy.
+# 1a. The frontend, instead of the button test (see fe_run=yes above).
+# Its card folder ($FE: slot/ or vesper/) is on the FAT partition, mounted
+# read-write for as long as it runs; its log is slot/Logs/slot.log or
+# vesper/logs/vesper.log, and the boot's logs get a copy. Vesper gets the
+# same shims, clocks and codec settings as slot, and VESPER_ROOT for its
+# folder; the trace (lightos/slottrace) is slot's only.
 # The environment is the one slot's ArkOS launcher (r36s/card/System/
 # r36s-launch.sh) sets. slot sets the volume itself, in software, so the
 # codec goes to full. This R36S's speaker is on the codec's headphone
 # output (HP), not on its class D (SPK): boot-34 to boot-36 played a tone
 # on each, and only HP came out of the speaker.
-# slot powers off with poweroff(8) and restarts with reboot(8): here both
-# end slot, init writes which one it asked for, and goes on with the logs
-# and the USB disk, then reboots.
+# The frontend powers off with poweroff(8) and restarts with reboot(8):
+# here both end it, init writes which one it asked for, and goes on with
+# the logs and the USB disk, then reboots.
 # slot's log is written to /tmp while it runs and copied to the card when
 # it exits: slot syncs the file system of its log every second while the
 # log grows, and on the card that costs frames. With lightos/slottrace on
@@ -341,33 +354,34 @@ snapshot() {
     [ -d $d ] && echo "${d##*/} $(cat $d/type) state $(cat $d/cur_state)/$(cat $d/max_state)"
   done
 }
-SLOT=/flash/slot
-if [ $slot = yes ]; then
+FE=/flash/$fe
+if [ $fe_run = yes ]; then
   if mount -t vfat -o rw,noatime "$part" /flash; then
     mountpoint -q /run || mount -t tmpfs tmpfs /run
-    # Mesa's shader cache on the card, so that slot's shaders are compiled
-    # once and not at every boot (in /tmp it starts empty each time).
-    mkdir -p /tmp/data /flash/lightos/cache /tmp/slot-shims $SLOT/Logs
-    # slot's poweroff and reboot, once it has saved and synced everything:
-    # the shim notes which, and stops slot. With SIGKILL: slot then sleeps
-    # 10 s to be killed by the system, and on SIGTERM it only sets a flag
-    # that its main thread, in that sleep, does not see (boot-59, boot-60:
-    # 10 s from slot's "poweroff" to its exit).
+    # Mesa's shader cache on the card, so that the frontend's shaders are
+    # compiled once and not at every boot (in /tmp it starts empty each time).
+    mkdir -p /tmp/data /flash/lightos/cache /tmp/fe-shims $FE/$fe_logs
+    # The frontend's poweroff and reboot, once it has saved and synced
+    # everything: the shim notes which, and stops the frontend. With
+    # SIGKILL: slot then sleeps 10 s to be killed by the system, and on
+    # SIGTERM it only sets a flag that its main thread, in that sleep, does
+    # not see (boot-59, boot-60: 10 s from slot's "poweroff" to its exit).
+    # Vesper runs them from its own process, so $PPID is Vesper too.
     for c in poweroff reboot; do
-      printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -KILL $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
-      chmod +x /tmp/slot-shims/$c
+      printf '#!/bin/sh\necho %s > /tmp/frontend-exit\nkill -KILL $PPID\nexit 0\n' $c > /tmp/fe-shims/$c
+      chmod +x /tmp/fe-shims/$c
     done
-    # Full clocks while slot runs, as its ArkOS launcher does: performance
-    # for every devfreq device that has it (the DDR, the GPU).
+    # Full clocks while the frontend runs, as slot's ArkOS launcher does:
+    # performance for every devfreq device that has it (the DDR, the GPU).
     for g in /sys/class/devfreq/*/governor; do
       grep -qw performance ${g%governor}available_governors 2>/dev/null && echo performance > $g
     done
-    say "slot: devfreq $(for d in /sys/class/devfreq/*; do echo -n "${d##*/} $(cat $d/governor) $(( $(cat $d/cur_freq) / 1000000 )) MHz; "; done)"
+    say "$fe: devfreq $(for d in /sys/class/devfreq/*; do echo -n "${d##*/} $(cat $d/governor) $(( $(cat $d/cur_freq) / 1000000 )) MHz; "; done)"
     amixer -q -c 0 cset name='Playback Mux' HP 2>/dev/null
     amixer -q -c 0 cset name='Master Playback Volume' 100% 2>/dev/null
-    [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1
+    [ -f $FE/$fe_logs/$fe.log ] && mv -f $FE/$fe_logs/$fe.log $FE/$fe_logs/$fe.log.1
     trace=
-    if [ $slottrace = yes ]; then
+    if [ $fe = slot ] && [ $slottrace = yes ]; then
       trace="SLOT_TRACE=1 SLOT_TRACE_LATENCY=1 SLOT_TRACE_FRAMES=1"
       snapshot start > /tmp/sys-snap.txt 2>&1
       sample > /tmp/sys.txt 2>&1 &
@@ -376,29 +390,35 @@ if [ $slot = yes ]; then
       command -v strace >/dev/null && trace_slot $traceafter &
     fi
     t0=$(up)
-    say "slot: started at ${t0} s${trace:+, with $trace}"
-    env PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
-      SLOT_ROOT=$SLOT SLOT_RUN=/run BASEOS_TARGET=r36s BASEOS_MODEL=R36S \
-      SLOT_GBA_CORE=gpsp SLOT_PACER=off $trace \
-      $SLOT/System/slot < /dev/null > /tmp/slot.log 2>&1
+    say "$fe: started at ${t0} s${trace:+, with $trace}"
+    if [ $fe = vesper ]; then
+      env PATH=/tmp/fe-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
+        VESPER_ROOT=$FE \
+        $FE/$fe_bin < /dev/null > /tmp/$fe.log 2>&1
+    else
+      env PATH=/tmp/fe-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
+        SLOT_ROOT=$FE SLOT_RUN=/run BASEOS_TARGET=r36s BASEOS_MODEL=R36S \
+        SLOT_GBA_CORE=gpsp SLOT_PACER=off $trace \
+        $FE/$fe_bin < /dev/null > /tmp/$fe.log 2>&1
+    fi
     st=$?
-    say "slot: exited with $st at $(up) s$([ -f /tmp/slot-exit ] && echo ", after asking for $(cat /tmp/slot-exit)")"
-    if [ $slottrace = yes ]; then
+    say "$fe: exited with $st at $(up) s$([ -f /tmp/frontend-exit ] && echo ", after asking for $(cat /tmp/frontend-exit)")"
+    if [ $fe = slot ] && [ $slottrace = yes ]; then
       kill $sampler
       snapshot end >> /tmp/sys-snap.txt 2>&1
       say "slot: $(grep -c "^slot: latency:" /tmp/slot.log) latency lines, $(grep "^slot: pace:" /tmp/slot.log | wc -l) pace lines"
     fi
-    cp /tmp/slot.log $SLOT/Logs/slot.log
+    cp /tmp/$fe.log $FE/$fe_logs/$fe.log
     sync
     umount /flash
   else
-    say "slot: could not mount $part read-write"
+    say "$fe: could not mount $part read-write"
   fi
   printf '\033[2J\033[H'
 fi
 
-# 1b. The button test, when slot does not run.
-if [ $slot = no ]; then
+# 1b. The button test, when no frontend runs.
+if [ $fe_run = no ]; then
   loud
   say ""
   readers=
@@ -563,7 +583,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $KEYS $dir/keys.txt
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
-  [ -f /tmp/slot.log ] && cp /tmp/slot.log $dir/slot.log
+  [ -f /tmp/$fe.log ] && cp /tmp/$fe.log $dir/$fe.log
   for f in /tmp/sys.txt /tmp/sys-snap.txt /tmp/sys-alsa.txt /tmp/slot-threads.txt; do [ -f $f ] && cp $f $dir/; done
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
@@ -572,16 +592,16 @@ else
   say "Could not mount $part: no logs."
 fi
 
-# 3. The end: what slot asked for (poweroff or reboot). Without its word,
-# poweroff, or with lightos/usbdisk a reboot, as before that file. With
-# lightos/usbdisk, the partition goes on the OTG port first; after slot the
+# 3. The end: what the frontend asked for (poweroff or reboot). Without its
+# word, poweroff, or with lightos/usbdisk a reboot, as before that file. With
+# lightos/usbdisk, the partition goes on the OTG port first; after it the
 # computer has WAIT_PLUG s to show up. (The rk817 charger is no sign of a
 # cable: boot-54 had it offline with the computer on the OTG port.)
 ending=poweroff
 wait_host=$WAIT_HOST
-if [ -f /tmp/slot-exit ]; then
+if [ -f /tmp/frontend-exit ]; then
   wait_host=$WAIT_PLUG
-  [ "$(cat /tmp/slot-exit)" = poweroff ] || ending=reboot
+  [ "$(cat /tmp/frontend-exit)" = poweroff ] || ending=reboot
 elif [ $usbdisk = yes ]; then
   ending=reboot
 fi
@@ -592,9 +612,9 @@ finish() {
   $ending -f
 }
 if [ $usbdisk = no ]; then
-  if [ ! -f /tmp/slot-exit ]; then
+  if [ ! -f /tmp/frontend-exit ]; then
     loud
-    finish "Stopped without slot asking to: ${ending} in 10 s." 10
+    finish "Stopped without $fe asking to: ${ending} in 10 s." 10
   fi
   finish "${ending}."
 fi

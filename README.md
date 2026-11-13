@@ -719,6 +719,23 @@ the old boot.
 slot needs no libudev. It loads EGL, GLES, GBM, libdrm and ALSA itself,
 and reads `/dev/input` directly.
 
+### Another frontend: Vesper
+
+`lightos/frontend` on the card picks the frontend by its first word:
+`slot` (the default, also without the file) or `vesper`, the GBA/GBC/DS
+frontend of `~/dev/r36s-handheld`. Vesper lives in `vesper/` on the FAT
+partition (that repo's `build/card/vesper`, from `tools/dist.sh`), with its
+program in `vesper/bin/vesper` and its log in `vesper/logs/vesper.log`
+(and `vesper.log` in the boot's logs). It gets what slot gets: the
+`poweroff`/`reboot` shims on `PATH`, `HOME=/tmp`, Mesa's cache in
+`lightos/cache`, the clocks at performance, the codec on HP at full; and
+`VESPER_ROOT=/flash/vesper` instead of slot's variables. The trace
+(`lightos/slottrace`) is slot's only. `lightos/noslot` stops either.
+`tools/test_init_stages.sh` checks it with a stand-in (case vesper, with a
+CRLF in `lightos/frontend`) and with Vesper's own build (case realvesper),
+which loads its libraries from the root file system and stops on finding
+no display.
+
 On the mainline kernel the joypad is called `r36s_Gamepad`, not ArkOS's
 `GO-Super Gamepad`. slot fell back to its Anbernic map, so no button
 worked (boot-40). slot-r36s 2646538 gives that name its own map: the
