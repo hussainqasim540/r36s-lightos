@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Draws Lume's logo as SVG, in QuisLab's style (~/dev/quislab, decision
-0001): two tones, the first letter heavy and lilac with a symbol in it (the
-Q holds </>, the L holds a play triangle), the rest thin in one neutral
-tone that follows the background, and the H's detached, slanted crossbar
-(here the E's middle bar).
+0001): two tones, the first letter heavy and lilac, the rest thin in one
+neutral tone that follows the background, and the H's detached, slanted
+crossbar (here the E's middle bar). Where QuisLab's Q holds </>, Lume's U
+wears the Game Boy's A and B buttons as its dots, lilac, set as on the pad:
+B low on the left, A high on the right.
 
 Writes assets/logo/lume-su-scuro.svg, lume-su-chiaro.svg (the wordmark),
 lume-marchio-su-scuro.svg, lume-marchio-su-chiaro.svg (the L alone) and
@@ -15,6 +16,13 @@ import os
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "logo")
 
+# The A and B buttons over the U: radius, gap to the U, half the distance
+# across between their centres and how much higher A sits than B (about 25
+# degrees, as on the pad).
+BUTTON = 19
+BUTTON_GAP = 30
+BUTTON_DX, BUTTON_RISE = 25, 24
+
 # QuisLab's palette (ricerca/2026-11-12-palette-e-logo.md).
 TONES = {
     "su-scuro": ("#9D88EC", "#F2EEE8"),   # lilla, testo (on notte #0E0C16)
@@ -22,6 +30,7 @@ TONES = {
 }
 
 TOP, BASE = 40, 280          # cap height 240, as the QH's H (245)
+HIGH = TOP - BUTTON_GAP - 2 * BUTTON - BUTTON_RISE   # A's top
 HEAVY, THIN = 52, 34         # the Q's stroke, the H's stems
 GAP = 13                     # the H's crossbar to its free stem
 SLANT = 0.9                  # the H crossbar's end: 472 across for 520 up
@@ -33,23 +42,24 @@ def poly(points, fill):
 
 
 def mark(lilac, ink):
-    """The L, with a play triangle in its corner and the foot cut at 45
-    degrees, as the Q's tail."""
+    """The L, its foot cut at 45 degrees, as the Q's tail."""
     foot = BASE - HEAVY
     shapes = [
         poly([(0, TOP), (HEAVY, TOP), (HEAVY, foot), (148, foot),
               (148 + HEAVY, BASE), (0, BASE)], lilac),
-        poly([(84, 118), (84, 190), (146, 154)], ink),
     ]
     return shapes, 148 + HEAVY
 
 
-def word(x, ink):
-    """U, M and E, thin, from x."""
+def word(x, ink, lilac):
+    """U, M and E, thin, from x; the U with the buttons over it."""
     out = []
     # U: two stems and a half ring.
     w, r = 180, 90
     cx, cy = x + w / 2, BASE - r
+    low = TOP - BUTTON_GAP - BUTTON
+    for bx, by in ((cx - BUTTON_DX, low), (cx + BUTTON_DX, low - BUTTON_RISE)):
+        out.append(f'<circle cx="{bx:g}" cy="{by:g}" r="{BUTTON}" fill="{lilac}"/>')
     out.append(
         f'<path d="M{x:g},{TOP} H{x + THIN:g} V{cy:g} '
         f'A{r - THIN:g},{r - THIN:g} 0 0 0 {x + w - THIN:g},{cy:g} V{TOP} H{x + w:g} V{cy:g} '
@@ -75,9 +85,11 @@ def word(x, ink):
     return out, x + w
 
 
-def svg(shapes, width, height=BASE + TOP, pad=0):
+def svg(shapes, width, top=0, pad=0):
+    """From top to BASE + TOP: TOP is the margin under and over the drawing."""
     body = "\n  ".join(shapes)
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-pad} 0 {width + 2 * pad} {height}" '
+    height = BASE + TOP - top
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-pad} {top} {width + 2 * pad} {height}" '
             f'width="{width + 2 * pad}" height="{height}">\n  {body}\n</svg>\n')
 
 
@@ -91,10 +103,10 @@ def splash():
     of the panel."""
     lilac, ink = TONES["su-scuro"]
     shapes, end = mark(lilac, ink)
-    rest, end = word(end + 46, ink)
+    rest, end = word(end + 46, ink, lilac)
     k = SPLASH_WIDTH / end
     x = (SCREEN[0] - SPLASH_WIDTH) / 2
-    y = SCREEN[1] / 2 - (TOP + BASE) / 2 * k
+    y = SCREEN[1] / 2 - (HIGH + BASE) / 2 * k
     body = "\n    ".join(shapes + rest)
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{SCREEN[0]}" height="{SCREEN[1]}" '
             f'viewBox="0 0 {SCREEN[0]} {SCREEN[1]}">\n'
@@ -109,9 +121,9 @@ def main():
         shapes, end = mark(lilac, ink)
         with open(os.path.join(HERE, f"lume-marchio-{name}.svg"), "w") as f:
             f.write(svg(shapes, end, pad=20))
-        rest, end = word(end + 46, ink)
+        rest, end = word(end + 46, ink, lilac)
         with open(os.path.join(HERE, f"lume-{name}.svg"), "w") as f:
-            f.write(svg(shapes + rest, end, pad=20))
+            f.write(svg(shapes + rest, end, top=HIGH - TOP, pad=20))
     print("wrote", ", ".join(sorted(os.listdir(HERE))))
 
 
