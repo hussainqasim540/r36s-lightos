@@ -54,13 +54,14 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   there 0.85 s after the kernel) and keeps the console quiet until slot
   draws. The button test, kmscube and the USB disk clear it and show their
   text. `vt.global_cursor_default=0` hides the cursor.
-- **Power.** slot's power-off powers the console off: after the logs, the
-  card is shared over the OTG port for 8 s (`WAIT_PLUG`), and for as long as
-  a computer that showed up keeps it, then `poweroff -f` (the rk817 is the
-  system power controller). slot's restart reboots the same way. Without
-  slot (the button test), it is the 2 minutes and the reboot of before. The
-  rk817 charger is no sign of a cable: boot-54 had it offline with the
-  computer on the OTG port.
+- **Power.** slot's power-off powers the console off right after the logs
+  (`poweroff -f`; the rk817 is the system power controller), and its
+  restart reboots. If slot stops by itself, the screen says so for 10 s and
+  the console powers off. The USB disk is for development only: with
+  `lightos/usbdisk` on the card, the card is shared over the OTG port first,
+  for 8 s after slot (`WAIT_PLUG`) or 2 minutes without it, and for as long
+  as a computer that showed up keeps it. The rk817 charger is no sign of a
+  cable: boot-54 had it offline with the computer on the OTG port.
 
 ## Back up the ArkOS card first
 

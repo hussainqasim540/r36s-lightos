@@ -21,10 +21,14 @@
 #      shows any button until KEYS_MIN_SECONDS;
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
-#   3. shares that partition over the OTG port, like "LightOS SD via USB";
-#   4. powers off if slot asked for it, or else reboots, when the computer
-#      ejects the card, or when no computer came: after slot within
-#      WAIT_PLUG s, otherwise within WAIT_HOST s.
+#   3. powers off, or reboots, as slot asked, at once. If slot stopped
+#      by itself, or there is none, it says so for 10 s and powers off (a
+#      reboot could loop).
+# With lightos/usbdisk on the card (development), step 3 first shares that
+# partition over the OTG port, like "LightOS SD via USB", and goes on when
+# the computer ejects the card, or when no computer came: after slot within
+# WAIT_PLUG s, otherwise within WAIT_HOST s; without slot's word it then
+# reboots.
 # U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT or
 # with VOL- held (boot.ini).
 #
@@ -133,6 +137,7 @@ guided=no
 gputrace=no
 slot=no
 slottrace=no
+usbdisk=no
 # The kernel's random number generator: the RK3326 has no hardware RNG
 # the kernel uses, so it was ready ("crng init done") only 5.6 to 10 s
 # after power-on, and until then getrandom() blocks. Mesa's drirc parser
@@ -146,6 +151,7 @@ seed=no
 if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
   [ -e /flash/lightos/gputrace ] && gputrace=yes
+  [ -e /flash/lightos/usbdisk ] && usbdisk=yes
   if [ -e /flash/lightos/slottrace ]; then
     slottrace=yes
     read traceafter < /flash/lightos/slottrace
@@ -524,15 +530,18 @@ else
   say "Could not mount $part: no logs."
 fi
 
-# 3. The partition over the OTG port, then the end: what slot asked for
-# (poweroff or reboot), or a reboot. After slot the computer has WAIT_PLUG s
-# to show up. (The rk817 charger is no sign of a cable: boot-54 had it
-# offline with the computer on the OTG port.)
-ending=reboot
+# 3. The end: what slot asked for (poweroff or reboot). Without its word,
+# poweroff, or with lightos/usbdisk a reboot, as before that file. With
+# lightos/usbdisk, the partition goes on the OTG port first; after slot the
+# computer has WAIT_PLUG s to show up. (The rk817 charger is no sign of a
+# cable: boot-54 had it offline with the computer on the OTG port.)
+ending=poweroff
 wait_host=$WAIT_HOST
 if [ -f /tmp/slot-exit ]; then
   wait_host=$WAIT_PLUG
-  [ "$(cat /tmp/slot-exit)" = poweroff ] && ending=poweroff
+  [ "$(cat /tmp/slot-exit)" = poweroff ] || ending=reboot
+elif [ $usbdisk = yes ]; then
+  ending=reboot
 fi
 finish() {
   say "$1"
@@ -540,6 +549,13 @@ finish() {
   sleep ${2:-0}
   $ending -f
 }
+if [ $usbdisk = no ]; then
+  if [ ! -f /tmp/slot-exit ]; then
+    loud
+    finish "Stopped without slot asking to: ${ending} in 10 s." 10
+  fi
+  finish "${ending}."
+fi
 loud
 UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n1)
 if [ -z "$UDC" ] || [ ! -d /sys/kernel/config/usb_gadget ]; then
