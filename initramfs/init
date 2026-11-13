@@ -103,6 +103,7 @@ fi
 guided=no
 gputrace=no
 slot=no
+slottrace=no
 # The kernel's random number generator: the RK3326 has no hardware RNG
 # the kernel uses, so it was ready ("crng init done") only 5.6 to 10 s
 # after power-on, and until then getrandom() blocks. Mesa's drirc parser
@@ -116,6 +117,7 @@ seed=no
 if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
   [ -e /flash/lightos/gputrace ] && gputrace=yes
+  [ -e /flash/lightos/slottrace ] && slottrace=yes
   # slot (its R36S build, dist-r36s/slot of slot-r36s) in slot/ on the
   # FAT partition: stage 2 starts it in place of the self-tests and the
   # button test, unless the card holds lightos/keytest or lightos/noslot.
@@ -202,6 +204,38 @@ fi
 # slot powers off with poweroff(8) and restarts with reboot(8): here both
 # end slot, init writes which one it asked for, and goes on with the logs
 # and the USB disk, then reboots.
+# slot's log is written to /tmp while it runs and copied to the card when
+# it exits: slot syncs the file system of its log every second while the
+# log grows, and on the card that costs frames. With lightos/slottrace on
+# the card, slot traces its pacing, audio and input latency
+# (SLOT_TRACE, SLOT_TRACE_LATENCY), and init samples the clocks, the
+# temperatures and the interrupts once a second (sys.txt in the logs).
+sample() {
+  echo "uptime cpu_mhz gpu_mhz soc_c gpu_c ctxt intr running"
+  while :; do
+    cf=0 gf=0 st=0 gt=0
+    read u _ < /proc/uptime
+    read cf < /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
+    read gf < /sys/class/devfreq/ff400000.gpu/cur_freq
+    read st < /sys/class/thermal/thermal_zone0/temp
+    read gt < /sys/class/thermal/thermal_zone1/temp
+    while read k v _; do
+      case $k in ctxt) c=$v ;; intr) i=$v ;; procs_running) r=$v ;; esac
+    done < /proc/stat
+    echo "$u $((${cf:-0} / 1000)) $((${gf:-0} / 1000000)) $((${st:-0} / 1000)) $((${gt:-0} / 1000)) $c $i $r"
+    sleep 1
+  done
+}
+snapshot() {
+  echo "== $1 at $(up) s"
+  cat /proc/interrupts
+  for d in /sys/devices/system/cpu/cpu[0-9]*/cpuidle/state*; do
+    [ -d $d ] && echo "${d#/sys/devices/system/cpu/} $(cat $d/name) usage $(cat $d/usage) time $(cat $d/time) us"
+  done
+  for d in /sys/class/thermal/cooling_device*; do
+    [ -d $d ] && echo "${d##*/} $(cat $d/type) state $(cat $d/cur_state)/$(cat $d/max_state)"
+  done
+}
 SLOT=/flash/slot
 if [ $slot = yes ]; then
   if mount -t vfat -o rw,noatime "$part" /flash; then
@@ -222,15 +256,27 @@ if [ $slot = yes ]; then
     amixer -q -c 0 cset name='Playback Mux' HP 2>/dev/null
     amixer -q -c 0 cset name='Master Playback Volume' 100% 2>/dev/null
     [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1
+    trace=
+    if [ $slottrace = yes ]; then
+      trace="SLOT_TRACE=1 SLOT_TRACE_LATENCY=1"
+      snapshot start > /tmp/sys-snap.txt 2>&1
+      sample > /tmp/sys.txt 2>&1 &
+      sampler=$!
+    fi
     t0=$(up)
-    say "slot: started at ${t0} s"
-    PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
+    say "slot: started at ${t0} s${trace:+, with $trace}"
+    env PATH=/tmp/slot-shims:$PATH HOME=/tmp XDG_CACHE_HOME=/flash/lightos/cache \
       SLOT_ROOT=$SLOT SLOT_RUN=/run BASEOS_TARGET=r36s BASEOS_MODEL=R36S \
-      SLOT_GBA_CORE=gpsp SLOT_PACER=off \
-      $SLOT/System/slot < /dev/null > $SLOT/Logs/slot.log 2>&1
+      SLOT_GBA_CORE=gpsp SLOT_PACER=off $trace \
+      $SLOT/System/slot < /dev/null > /tmp/slot.log 2>&1
     st=$?
     say "slot: exited with $st at $(up) s$([ -f /tmp/slot-exit ] && echo ", after asking for $(cat /tmp/slot-exit)")"
-    cp $SLOT/Logs/slot.log /tmp/slot.log
+    if [ $slottrace = yes ]; then
+      kill $sampler
+      snapshot end >> /tmp/sys-snap.txt 2>&1
+      say "slot: $(grep -c "^slot: latency:" /tmp/slot.log) latency lines, $(grep "^slot: pace:" /tmp/slot.log | wc -l) pace lines"
+    fi
+    cp /tmp/slot.log $SLOT/Logs/slot.log
     sync
     umount /flash
   else
@@ -405,6 +451,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
   [ -f /tmp/slot.log ] && cp /tmp/slot.log $dir/slot.log
+  for f in /tmp/sys.txt /tmp/sys-snap.txt; do [ -f $f ] && cp $f $dir/; done
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash

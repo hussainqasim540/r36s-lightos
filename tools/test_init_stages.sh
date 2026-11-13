@@ -3,7 +3,7 @@
 # hand-over from stage 1 (the initramfs) to stage 2 (lightos/rootfs.sqfs):
 # a FAT image labelled ROCKNIX on a loop device, the stage 1 tree
 # (out/stage1.tar) on a tmpfs as the root, init as PID 1 in its own PID and
-# mount namespaces. Three cases:
+# mount namespaces. The cases:
 #   none   no lightos/rootfs.sqfs: stage 1 goes on by itself;
 #   good   a root file system: init switches to it, logs say stage 2;
 #   bad    a damaged rootfs.sqfs: stage 1 goes on by itself;
@@ -11,6 +11,8 @@
 #          times under strace first (only with out/rootfs/rootfs.sqfs);
 #   slot   the root file system and a stand-in slot/System/slot that asks
 #          for poweroff: init starts it, and its poweroff ends it;
+#   slottrace  the same with lightos/slottrace: slot gets the trace
+#          variables, init samples the system into sys.txt;
 #   realslot  slot's own R36S build (SLOT_DIST, by default
 #          ~/dev/slot-r36s/dist-r36s/slot, if it is there): it has to load
 #          its libraries and stop on finding no display.
@@ -61,9 +63,10 @@ run() {  # run CASE
     none) ;;
     trace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
            : > gputrace; mcopy -i fat.img gputrace ::lightos/gputrace ;;
-    slot) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
+    slot|slottrace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
+          [ $1 = slottrace ] && { : > slottrace; mcopy -i fat.img slottrace ::lightos/slottrace; }
           mkdir -p fake/System
-          printf "#!/bin/sh\necho \"stand-in slot, root \$SLOT_ROOT, run \$SLOT_RUN\"\nls -ld /data /run\npoweroff\nsleep 30\necho not stopped\n" > fake/System/slot
+          printf "#!/bin/sh\necho \"stand-in slot, root \$SLOT_ROOT, run \$SLOT_RUN, trace \${SLOT_TRACE:-off} \${SLOT_TRACE_LATENCY:-off}\"\nls -ld /data /run\nsleep 2\npoweroff\nsleep 30\necho not stopped\n" > fake/System/slot
           chmod +x fake/System/slot
           mcopy -s -i fat.img fake ::slot ;;
     realslot) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
@@ -110,6 +113,18 @@ run() {  # run CASE
       check $1 "slot.log: its environment" $b/slot.log "root /flash/slot, run /run"
       lacks $1 "slot.log: its poweroff stopped it" $b/slot.log "not stopped"
       lacks $1 "no kmscube when slot runs" $b/init.txt "GPU: kmscube"
+      check $1 "slot/Logs/slot.log: copied from /tmp" /mnt/$1/slot/Logs/slot.log "stand-in slot"
+      check $1 "slot.log: no trace without slottrace" $b/slot.log "trace off off"
+      check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
+    slottrace)
+      check $1 "init.txt: slot started with the traces" $b/init.txt "with SLOT_TRACE=1 SLOT_TRACE_LATENCY=1"
+      check $1 "slot.log: the trace variables" $b/slot.log "trace 1 1"
+      check $1 "init.txt: slot ended by its poweroff" $b/init.txt "after asking for poweroff"
+      check $1 "init.txt: the trace line counts" $b/init.txt "latency lines"
+      echo "    sys.txt:"; grep -v "open /sys" $b/sys.txt | sed "s/^/      /" | head -n 6
+      check $1 "sys.txt: the sampler header" $b/sys.txt "^uptime cpu_mhz"
+      check $1 "sys.txt: a sample" $b/sys.txt "^[0-9.]* [0-9]* [0-9]* "
+      check $1 "sys-snap.txt: the end snapshot" $b/sys-snap.txt "^== end"
       check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
     realslot)
       echo "    slot.log:"; sed "s/^/      /" $b/slot.log | head -n 12
@@ -129,6 +144,7 @@ run good
 run bad
 [ -f /src/out/rootfs/rootfs.sqfs ] && run trace
 [ -f /src/out/rootfs/rootfs.sqfs ] && run slot
+[ -f /src/out/rootfs/rootfs.sqfs ] && run slottrace
 [ -f /src/out/rootfs/rootfs.sqfs ] && [ -f /slot/System/slot ] && run realslot
 [ $fails = 0 ] && echo "All checks passed." || { echo "$fails checks failed."; exit 1; }
 '
