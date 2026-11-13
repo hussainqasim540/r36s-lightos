@@ -46,7 +46,9 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   (boot-58 to boot-60). So stage 1, as soon as it finds the FAT partition,
   reads the line from debugfs's gpio list (`|VOLUMEDOWN ... in  lo` when
   held; the line goes to `init.txt` at every boot), writes `ROCKNIX.TXT`
-  and reboots (`tools/test_init_stages.sh`, case volheld).
+  and reboots (`tools/test_init_stages.sh`, case volheld). On the console:
+  boot-61 read `in  hi` without the key; with it held, init wrote
+  `ROCKNIX.TXT` and rebooted, and boot-62 was ROCKNIX.
 - **The logo.** `assets/logo/` holds Lume's logo in QuisLab's style
   (`~/dev/quislab`, decision 0001: two tones, the first letter heavy and
   lilac, the rest thin in a neutral tone, the H's detached slanted bar; the
@@ -62,7 +64,7 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   restart reboots. Once slot has saved and synced, its `poweroff` (init's
   shim) stops it with SIGKILL: slot then sleeps 10 s waiting for the system
   to kill it, and SIGTERM did not end that sleep (boot-59, boot-60 took
-  10 s more). If slot stops by itself, the screen says so for 10 s and
+  10 s more; boot-61, with SIGKILL, 0.2 s from slot's request to its exit). If slot stops by itself, the screen says so for 10 s and
   the console powers off. The USB disk is for development only: with
   `lightos/usbdisk` on the card, the card is shared over the OTG port first,
   for 8 s after slot (`WAIT_PLUG`) or 2 minutes without it, and for as long
