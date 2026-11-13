@@ -441,6 +441,8 @@ hardware() {
   head -n 1 /flash/ROCKNIX.TXT 2>/dev/null
   echo "== sector 31 of $part (U-Boot's copy of the last one-shot token it booted)"
   dd if=$part bs=512 skip=31 count=1 2>/dev/null | head -n 1
+  echo "== sector 30 of $part (U-Boot's VOL- readings, boot.ini)"
+  dd if=$part bs=512 skip=30 count=1 2>/dev/null | hexdump -C | head -n 3
   echo "== panel node"
   panel=/proc/device-tree/dsi@ff450000/panel@0
   tr '\0' ' ' < $panel/compatible; echo

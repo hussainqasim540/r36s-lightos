@@ -37,9 +37,13 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   it has not booted yet and keeps it in sector 31 of the partition, as the
   LightOS one-shot did (below), so the power-on after is Lume again. Without
   `lightos/initrd.img` it boots ROCKNIX too. `tools/test_boot_ini.sh` runs
-  every case in a U-Boot sandbox. VOL- is GPIO2 A1, `gpio input c1` for this
-  U-Boot, which names the banks A to D (`boot.ini` already reads `c22`, the
-  headphone pin, for the ODROID-GO2 revisions).
+  every case in a U-Boot sandbox. VOL- is GPIO2 A1, active low with the
+  SoC's pull-up. `gpio input c1` alone (this U-Boot names the banks A to D)
+  did nothing on the console (boot-56, boot-57), so `boot.ini` also turns
+  the pull-up on and reads the pin from GPIO2's registers, and either
+  reading is enough. Both go to sector 30 of the partition (`LUMEDIAG`),
+  which Lume's `hardware.txt` and ROCKNIX's log folder
+  (`uboot-sector30.bin`) copy.
 - **The logo.** `assets/logo/` holds Lume's logo in QuisLab's style
   (`~/dev/quislab`, decision 0001: two tones, the first letter heavy and
   lilac, the rest thin in a neutral tone, the H's detached slanted bar; the

@@ -22,6 +22,11 @@ mount_part "$disk" "/storage" "rw,noatime"
   mkdir -p $logs/boot-$count
   cat /proc/cmdline > $logs/boot-$count/cmdline.txt
   dmesg > $logs/boot-$count/dmesg-initramfs.txt
+  # U-Boot's VOL- readings (boot.ini): sector 30 of this partition.
+  while read -r dev mnt rest; do
+    [ "$mnt" = /flash ] && flashdev=$dev
+  done < /proc/mounts
+  [ -n "$flashdev" ] && dd if="$flashdev" of=$logs/boot-$count/uboot-sector30.bin bs=512 skip=30 count=1 2>/dev/null
 
   units=/storage/.config/system.d
   mkdir -p $units/rocknix.target.wants
