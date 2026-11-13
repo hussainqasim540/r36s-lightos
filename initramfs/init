@@ -209,11 +209,16 @@ fi
 # log grows, and on the card that costs frames. With lightos/slottrace on
 # the card, slot traces its pacing, audio and input latency
 # (SLOT_TRACE, SLOT_TRACE_LATENCY), and init samples the clocks, the
-# temperatures and the interrupts once a second (sys.txt in the logs).
+# temperatures, the interrupts and the sound card's hardware pointer once
+# a second (sys.txt in the logs: the pointer's steps are the codec's real
+# sample rate), and slot prints the phases of each frame that missed a
+# flip (SLOT_TRACE_FRAMES).
+PCM=/proc/asound/card0/pcm0p/sub0
 sample() {
-  echo "uptime cpu_mhz gpu_mhz soc_c gpu_c ctxt intr running"
+  echo "uptime cpu_mhz gpu_mhz soc_c gpu_c ctxt intr running hw_ptr"
+  n=0
   while :; do
-    cf=0 gf=0 st=0 gt=0
+    cf=0 gf=0 st=0 gt=0 hp=0
     read u _ < /proc/uptime
     read cf < /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
     read gf < /sys/class/devfreq/ff400000.gpu/cur_freq
@@ -222,7 +227,12 @@ sample() {
     while read k v _; do
       case $k in ctxt) c=$v ;; intr) i=$v ;; procs_running) r=$v ;; esac
     done < /proc/stat
-    echo "$u $((${cf:-0} / 1000)) $((${gf:-0} / 1000000)) $((${st:-0} / 1000)) $((${gt:-0} / 1000)) $c $i $r"
+    [ -f $PCM/status ] && while read k _ v; do
+      case $k in hw_ptr) hp=$v ;; esac
+    done < $PCM/status
+    echo "$u $((${cf:-0} / 1000)) $((${gf:-0} / 1000000)) $((${st:-0} / 1000)) $((${gt:-0} / 1000)) $c $i $r $hp"
+    n=$((n + 1))
+    [ $n = 20 ] && cat $PCM/hw_params $PCM/sw_params > /tmp/sys-alsa.txt 2>&1
     sleep 1
   done
 }
@@ -258,7 +268,7 @@ if [ $slot = yes ]; then
     [ -f $SLOT/Logs/slot.log ] && mv -f $SLOT/Logs/slot.log $SLOT/Logs/slot.log.1
     trace=
     if [ $slottrace = yes ]; then
-      trace="SLOT_TRACE=1 SLOT_TRACE_LATENCY=1"
+      trace="SLOT_TRACE=1 SLOT_TRACE_LATENCY=1 SLOT_TRACE_FRAMES=1"
       snapshot start > /tmp/sys-snap.txt 2>&1
       sample > /tmp/sys.txt 2>&1 &
       sampler=$!
@@ -451,7 +461,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
   [ -f /tmp/slot.log ] && cp /tmp/slot.log $dir/slot.log
-  for f in /tmp/sys.txt /tmp/sys-snap.txt; do [ -f $f ] && cp $f $dir/; done
+  for f in /tmp/sys.txt /tmp/sys-snap.txt /tmp/sys-alsa.txt; do [ -f $f ] && cp $f $dir/; done
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash

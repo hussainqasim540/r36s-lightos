@@ -117,7 +117,7 @@ run() {  # run CASE
       check $1 "slot.log: no trace without slottrace" $b/slot.log "trace off off"
       check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
     slottrace)
-      check $1 "init.txt: slot started with the traces" $b/init.txt "with SLOT_TRACE=1 SLOT_TRACE_LATENCY=1"
+      check $1 "init.txt: slot started with the traces" $b/init.txt "with SLOT_TRACE=1 SLOT_TRACE_LATENCY=1 SLOT_TRACE_FRAMES=1"
       check $1 "slot.log: the trace variables" $b/slot.log "trace 1 1"
       check $1 "init.txt: slot ended by its poweroff" $b/init.txt "after asking for poweroff"
       check $1 "init.txt: the trace line counts" $b/init.txt "latency lines"
