@@ -117,7 +117,10 @@ seed=no
 if [ $seed = yes ] && mount -t vfat -o rw,noatime "$part" /flash || mount -t vfat -o ro "$part" /flash; then
   [ -e /flash/lightos/keytest ] && guided=yes
   [ -e /flash/lightos/gputrace ] && gputrace=yes
-  [ -e /flash/lightos/slottrace ] && slottrace=yes
+  if [ -e /flash/lightos/slottrace ]; then
+    slottrace=yes
+    read traceafter < /flash/lightos/slottrace
+  fi
   # slot (its R36S build, dist-r36s/slot of slot-r36s) in slot/ on the
   # FAT partition: stage 2 starts it in place of the self-tests and the
   # button test, unless the card holds lightos/keytest or lightos/noslot.
@@ -212,7 +215,10 @@ fi
 # temperatures, the interrupts and the sound card's hardware pointer once
 # a second (sys.txt in the logs: the pointer's steps are the codec's real
 # sample rate), and slot prints the phases of each frame that missed a
-# flip (SLOT_TRACE_FRAMES).
+# flip (SLOT_TRACE_FRAMES). After 60 s (or the number of seconds written in
+# lightos/slottrace), strace follows every thread of slot for 20 s
+# (strace-slot.txt), with each thread's name and context switches before
+# and after (slot-threads.txt).
 PCM=/proc/asound/card0/pcm0p/sub0
 sample() {
   echo "uptime cpu_mhz gpu_mhz soc_c gpu_c ctxt intr running hw_ptr"
@@ -235,6 +241,20 @@ sample() {
     [ $n = 20 ] && cat $PCM/hw_params $PCM/sw_params > /tmp/sys-alsa.txt 2>&1
     sleep 1
   done
+}
+threads() {
+  for t in /proc/$1/task/*; do
+    echo "${t##*/} $(cat $t/comm) $(grep ctxt_switches $t/status | tr -s '\t\n' '  ')"
+  done
+}
+trace_slot() {
+  sleep $1
+  pid=$(pidof slot) || return
+  { echo "== before"; threads $pid; } > /tmp/slot-threads.txt
+  args=
+  for t in /proc/$pid/task/*; do args="$args -p ${t##*/}"; done
+  timeout -s INT 20 strace -tt -T -o /tmp/strace-slot.txt $args 2>/dev/null
+  { echo "== after"; threads $pid; } >> /tmp/slot-threads.txt
 }
 snapshot() {
   echo "== $1 at $(up) s"
@@ -272,6 +292,8 @@ if [ $slot = yes ]; then
       snapshot start > /tmp/sys-snap.txt 2>&1
       sample > /tmp/sys.txt 2>&1 &
       sampler=$!
+      case $traceafter in ''|*[!0-9]*) traceafter=60 ;; esac
+      command -v strace >/dev/null && trace_slot $traceafter &
     fi
     t0=$(up)
     say "slot: started at ${t0} s${trace:+, with $trace}"
@@ -461,7 +483,7 @@ if mount -t vfat -o rw,noatime "$part" /flash; then
   cp $RAW $dir/keys-raw.txt
   [ -s $GPU ] && cp $GPU $dir/gpu.txt
   [ -f /tmp/slot.log ] && cp /tmp/slot.log $dir/slot.log
-  for f in /tmp/sys.txt /tmp/sys-snap.txt /tmp/sys-alsa.txt; do [ -f $f ] && cp $f $dir/; done
+  for f in /tmp/sys.txt /tmp/sys-snap.txt /tmp/sys-alsa.txt /tmp/slot-threads.txt; do [ -f $f ] && cp $f $dir/; done
   for f in /tmp/strace-*.txt; do [ -f $f ] && cp $f $dir/; done
   sync
   umount /flash

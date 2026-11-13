@@ -64,9 +64,9 @@ run() {  # run CASE
     trace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
            : > gputrace; mcopy -i fat.img gputrace ::lightos/gputrace ;;
     slot|slottrace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
-          [ $1 = slottrace ] && { : > slottrace; mcopy -i fat.img slottrace ::lightos/slottrace; }
+          [ $1 = slottrace ] && { echo 1 > slottrace; mcopy -i fat.img slottrace ::lightos/slottrace; }
           mkdir -p fake/System
-          printf "#!/bin/sh\necho \"stand-in slot, root \$SLOT_ROOT, run \$SLOT_RUN, trace \${SLOT_TRACE:-off} \${SLOT_TRACE_LATENCY:-off}\"\nls -ld /data /run\nsleep 2\npoweroff\nsleep 30\necho not stopped\n" > fake/System/slot
+          printf "#!/bin/sh\necho \"stand-in slot, root \$SLOT_ROOT, run \$SLOT_RUN, trace \${SLOT_TRACE:-off} \${SLOT_TRACE_LATENCY:-off}\"\nls -ld /data /run\nsleep 5\npoweroff\nsleep 30\necho not stopped\n" > fake/System/slot
           chmod +x fake/System/slot
           mcopy -s -i fat.img fake ::slot ;;
     realslot) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
@@ -125,6 +125,9 @@ run() {  # run CASE
       check $1 "sys.txt: the sampler header" $b/sys.txt "^uptime cpu_mhz"
       check $1 "sys.txt: a sample" $b/sys.txt "^[0-9.]* [0-9]* [0-9]* "
       check $1 "sys-snap.txt: the end snapshot" $b/sys-snap.txt "^== end"
+      echo "    slot-threads.txt:"; sed "s/^/      /" $b/slot-threads.txt | head -n 6
+      check $1 "slot-threads.txt: the threads after strace" $b/slot-threads.txt "^== after"
+      check $1 "strace-slot.txt: strace followed slot" $b/strace-slot.txt "[0-9]"
       check $1 "reached the USB step" console-$1.txt "No USB device controller" ;;
     realslot)
       echo "    slot.log:"; sed "s/^/      /" $b/slot.log | head -n 12
