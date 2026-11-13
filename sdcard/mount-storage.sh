@@ -39,7 +39,8 @@ mount_part "$disk" "/storage" "rw,noatime"
   ports=/storage/games-internal/roms/ports
   mkdir -p $ports
   [ -f $src/usb-disk-port.sh ] && cp $src/usb-disk-port.sh "$ports/LightOS SD via USB.sh"
-  [ -f $src/once-port.sh ] && cp $src/once-port.sh "$ports/LightOS boot once.sh"
+  # Lume is the default now: the old "LightOS boot once" entry goes.
+  rm -f "$ports/LightOS boot once.sh"
 
   sync
   mount -o remount,ro /flash

@@ -1,9 +1,9 @@
 #!/bin/sh
 # Runs sdcard/boot.ini in a U-Boot sandbox (mainline v2024.10, in Docker)
-# against a FAT32 image laid out like the ROCKNIX card, and checks the
-# LIGHTOS.TXT one-shot: which kernel arguments and initrd booti would get,
-# what U-Boot leaves in sector 31 of the partition, and that it never
-# changes the file system.
+# against a FAT32 image laid out like the ROCKNIX card, and checks that it
+# boots Lume by default and ROCKNIX once for ROCKNIX.TXT or with VOL- held:
+# which kernel arguments and initrd booti would get, what U-Boot leaves in
+# sector 31 of the partition, and that it never changes the file system.
 #
 # The sandbox's commands are newer than the console's 2017 U-Boot. This
 # checks the script's logic; the script only reads files and writes one raw
@@ -51,14 +51,21 @@ cd /t
 # and "mmc write" (v2024.10 passes the address as a host pointer, without
 # map_sysmem), so they become "read/write mmc 1:0": the same raw blocks of
 # the same device.
-tail -n +2 boot.ini | sed -e "s/^booti /echo RESULT /" \
-  -e "s/if mmc read /if read mmc 1:0 /" -e "s/if mmc write /if write mmc 1:0 /" > boot.cmd
-grep -q "read mmc 1:0" boot.cmd && grep -q "write mmc 1:0" boot.cmd
-echo "echo ARGS \${bootargs}" >> boot.cmd
-echo "echo DTBO \${dtbo}" >> boot.cmd
-echo "echo DTB \${dtb_file}" >> boot.cmd
-echo "fdt print /dsi@ff450000/panel@0 panel_description" >> boot.cmd
-mkimage -A sandbox -T script -C none -d boot.cmd boot.scr >/dev/null
+# VOL- ("gpio input c1") becomes false, or true for held.scr: the sandbox
+# has no such pin.
+script() {
+  tail -n +2 boot.ini | sed -e "s/^booti /echo RESULT /" \
+    -e "s/if mmc read /if read mmc 1:0 /" -e "s/if mmc write /if write mmc 1:0 /" \
+    -e "s/^if gpio input c1; then/if $1; then/" > boot.cmd
+  grep -q "read mmc 1:0" boot.cmd && grep -q "write mmc 1:0" boot.cmd && grep -q "^if $1; then" boot.cmd
+  echo "echo ARGS \${bootargs}" >> boot.cmd
+  echo "echo DTBO \${dtbo}" >> boot.cmd
+  echo "echo DTB \${dtb_file}" >> boot.cmd
+  echo "fdt print /dsi@ff450000/panel@0 panel_description" >> boot.cmd
+  mkimage -A sandbox -T script -C none -d boot.cmd $2 >/dev/null
+}
+script false boot.scr
+script true held.scr
 
 # 300 MB image, one FAT32 partition with 4 KiB clusters, like the card.
 OFF=$((2048 * 512))
@@ -92,15 +99,17 @@ make_image() {
     [ -f lightos-panel.dtbo ] && mcopy -i "$I" lightos-panel.dtbo ::lightos/mipi-panel.dtbo
   fi
   mcopy -i "$I" boot.scr ::boot.scr
+  mcopy -i "$I" held.scr ::held.scr
 }
 flag() {
-  { echo "L $1 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > LIGHTOS.TXT
-  mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT
+  { echo "R $1 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > ROCKNIX.TXT
+  mcopy -o -i "mmc1.img@@$OFF" ROCKNIX.TXT ::ROCKNIX.TXT
 }
+put_sector() { printf "$1" | dd of=mmc1.img bs=512 seek=$((2048 + 31)) conv=notrunc 2>/dev/null; }
 # Sector 31 of the partition, first line.
 sector() { dd if=mmc1.img bs=512 skip=$((2048 + 31)) count=1 2>/dev/null | tr -d "\0" | head -n 1; }
 run() {
-  $UB -d $DTB -c "setenv hwrev none; load mmc 1:1 0x800800 boot.scr && source 0x800800" 2>&1 | tr -d "\r" > out.txt || true
+  $UB -d $DTB -c "setenv hwrev none; load mmc 1:1 0x800800 ${1:-boot}.scr && source 0x800800" 2>&1 | tr -d "\r" > out.txt || true
   RESULT=$(grep "^RESULT" out.txt | tail -1)
   ARGS=$(grep "^ARGS" out.txt | tail -1)
   DTBO=$(grep "^DTBO" out.txt | tail -1)
@@ -120,113 +129,129 @@ fsck_ok() {
 others() { dd if=mmc1.img bs=512 skip=2048 2>/dev/null | dd bs=512 count=31 2>/dev/null | md5sum | cut -c1-8
            dd if=mmc1.img bs=512 skip=$((2048 + 32)) 2>/dev/null | md5sum | cut -c1-8; }
 rocknix="RESULT 0x02000000 - 0x01f00000"
-lightos="RESULT 0x02000000 0x04000000 0x01f00000"
-largs="ARGS rdinit=/lightos/init quiet panic=10 initcall_debug log_buf_len=1M console=ttyS2,115200 console=tty0"
+lume="RESULT 0x02000000 0x04000000 0x01f00000"
+largs="ARGS rdinit=/lightos/init quiet panic=10 initcall_debug log_buf_len=1M console=ttyS2,115200 console=tty0 vt.global_cursor_default=0"
 rargs() { echo "$ARGS" | grep -q "^ARGS boot=LABEL=ROCKNIX" && echo rocknix || echo "$ARGS"; }
 
-echo "no LIGHTOS.TXT"
-make_image; run
-check booti "$RESULT" "$rocknix"
-check args "$(rargs)" rocknix
-check sector "$(sector)" ""
-grep -i "fdt_err\|failed to apply" out.txt | sed "s/^/  note  /"
-
-echo "LIGHTOS.TXT armed with token A"
-make_image; flag A; before=$(others); run
-check booti "$RESULT" "$lightos"
+echo "power-on, nothing armed"
+make_image; before=$(others); run
+check booti "$RESULT" "$lume"
 check args "$ARGS" "$largs"
-check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
+check sector "$(sector)" ""
 check "kernel (no lightos/Image)" "$(grep -c "^1000000 bytes read" out.txt)" 1
 check "overlay (no lightos/mipi-panel.dtbo)" "$DTBO" "DTBO overlays/mipi-panel.dtbo"
 check "device tree" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
 check "rest of the partition" "$(others)" "$before"
 check "file system" "$(fsck_ok)" clean
+grep -i "fdt_err\|failed to apply" out.txt | sed "s/^/  note  /"
+
+echo "and the power-on after"
+run
+check booti "$RESULT" "$lume"
+
+echo "VOL- held"
+make_image; run held
+check booti "$RESULT" "$rocknix"
+check args "$(rargs)" rocknix
+check sector "$(sector)" ""
+echo "VOL- released"
+run
+check booti "$RESULT" "$lume"
+
+echo "ROCKNIX.TXT armed with token A"
+make_image; flag A; before=$(others); run
+check booti "$RESULT" "$rocknix"
+check args "$(rargs)" rocknix
+check sector "$(sector)" "R A 0123456789abcdef0123456789abcdef"
+check "kernel" "$(grep -c "^1000000 bytes read" out.txt)" 1
+check "rest of the partition" "$(others)" "$before"
+check "file system" "$(fsck_ok)" clean
 
 echo "second power-on, same token"
 run
-check booti "$RESULT" "$rocknix"
-check args "$(rargs)" rocknix
-check sector "$(sector)" "L A 0123456789abcdef0123456789abcdef"
+check booti "$RESULT" "$lume"
+check sector "$(sector)" "R A 0123456789abcdef0123456789abcdef"
 
 echo "armed again with token B"
 flag B; run
-check booti "$RESULT" "$lightos"
-check sector "$(sector)" "L B 0123456789abcdef0123456789abcdef"
+check booti "$RESULT" "$rocknix"
+check sector "$(sector)" "R B 0123456789abcdef0123456789abcdef"
 run
-check "and the power-on after" "$RESULT" "$rocknix"
+check "and the power-on after" "$RESULT" "$lume"
 
-echo "armed, with lightos/Image"
-make_image image; flag A; run
-check booti "$RESULT" "$lightos"
+echo "armed, sector 31 left by the LightOS one-shot"
+make_image; flag A; put_sector "L 20261113T084534 77c31685-e4a8-4b6a-bdc2-91e46cd4dc1d"; run
+check booti "$RESULT" "$rocknix"
+check sector "$(sector)" "R A 0123456789abcdef0123456789abcdef"
+
+echo "armed, VOL- held too"
+make_image; flag A; run held
+check booti "$RESULT" "$rocknix"
+check "token kept for the next power-on" "$(sector)" ""
+
+echo "with lightos/Image"
+make_image image; run
+check booti "$RESULT" "$lume"
 check kernel "$(grep -c "^1234567 bytes read" out.txt)" 1
 check "not KERNEL" "$(grep -c "^1000000 bytes read" out.txt)" 0
-run
-check "the power-on after" "$RESULT" "$rocknix"
+flag A; run
+check "ROCKNIX.TXT armed" "$RESULT" "$rocknix"
 check "kernel then" "$(grep -c "^1000000 bytes read" out.txt)" 1
 
-echo "armed, with lightos/mipi-panel.dtbo"
+echo "with lightos/mipi-panel.dtbo"
 if [ -f lightos-panel.dtbo ]; then
-  make_image panel; flag A; run
-  check booti "$RESULT" "$lightos"
+  make_image panel; run
+  check booti "$RESULT" "$lume"
   check overlay "$DTBO" "DTBO lightos/mipi-panel.dtbo"
   check "overlay errors" "$APPLY" 0
   check "overlay bytes read" "$(grep -c "^$(wc -c < lightos-panel.dtbo) bytes read" out.txt)" 1
   check "delays in the tree" "$(grep -o "delays=[0-9,]*" out.txt)" "delays=20,10,20,0,20"
-  run
-  check "the power-on after" "$RESULT" "$rocknix"
+  run held
+  check "VOL- held" "$RESULT" "$rocknix"
   check "overlay then" "$DTBO" "DTBO overlays/mipi-panel.dtbo"
   check "delays then" "$(grep -o "delays=[0-9,]*" out.txt)" "delays=20,150,20,120,20"
-  echo "not armed, lightos/mipi-panel.dtbo there"
-  make_image panel; run
-  check overlay "$DTBO" "DTBO overlays/mipi-panel.dtbo"
 else
   echo "  skip  no out/panel/mipi-panel.dtbo (tools/build_panel_overlay.sh)"
 fi
 
-echo "armed, with lightos/Image, its device tree and lightos/mipi-panel.dtbo (as installed)"
-make_image image-dtb; flag A; run
-check booti "$RESULT" "$lightos"
+echo "with lightos/Image, its device tree and lightos/mipi-panel.dtbo (as installed)"
+make_image image-dtb; run
+check booti "$RESULT" "$lume"
 check "device tree" "$TREE" "DTB lightos/rk3326-gameconsole-r36s.dtb"
 check "overlay errors" "$APPLY" 0
 if [ -f lightos-panel.dtbo ]; then
   check overlay "$DTBO" "DTBO lightos/mipi-panel.dtbo"
   check "delays in the tree" "$(grep -o "delays=[0-9,]*" out.txt)" "delays=20,10,20,0,20"
 fi
-run
-check "the power-on after" "$RESULT" "$rocknix"
+run held
+check "VOL- held" "$RESULT" "$rocknix"
 check "device tree then" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
 
-echo "armed, lightos device tree without lightos/Image"
-make_image dtb-only; flag A; run
-check booti "$RESULT" "$lightos"
+echo "lightos device tree without lightos/Image"
+make_image dtb-only; run
+check booti "$RESULT" "$lume"
 check "device tree" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
 
-echo "lightos/Image there but not armed"
-make_image image; run
-check booti "$RESULT" "$rocknix"
-check kernel "$(grep -c "^1000000 bytes read" out.txt)" 1
-
-echo "armed, no lightos/initrd.img"
-make_image no-initrd; flag A; run
+echo "no lightos/initrd.img"
+make_image no-initrd; run
 check booti "$RESULT" "$rocknix"
 check args "$(rargs)" rocknix
 check sector "$(sector)" ""
 
-echo "LIGHTOS.TXT starting with another letter"
-make_image; { echo "R A 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > LIGHTOS.TXT
-mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT; run
-check booti "$RESULT" "$rocknix"
+echo "ROCKNIX.TXT starting with another letter"
+make_image; { echo "L A 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > ROCKNIX.TXT
+mcopy -o -i "mmc1.img@@$OFF" ROCKNIX.TXT ::ROCKNIX.TXT; run
+check booti "$RESULT" "$lume"
 check sector "$(sector)" ""
 
-echo "LIGHTOS.TXT shorter than 64 bytes"
-make_image; echo "L short" > LIGHTOS.TXT; mcopy -o -i "mmc1.img@@$OFF" LIGHTOS.TXT ::LIGHTOS.TXT; run
-check booti "$RESULT" "$rocknix"
+echo "ROCKNIX.TXT shorter than 64 bytes"
+make_image; echo "R short" > ROCKNIX.TXT; mcopy -o -i "mmc1.img@@$OFF" ROCKNIX.TXT ::ROCKNIX.TXT; run
+check booti "$RESULT" "$lume"
 check sector "$(sector)" ""
 
 echo "sector 31 holds something else"
-make_image; flag A
-printf "XYZ not ours" | dd of=mmc1.img bs=512 seek=$((2048 + 31)) conv=notrunc 2>/dev/null; run
-check booti "$RESULT" "$rocknix"
+make_image; flag A; put_sector "XYZ not ours"; run
+check booti "$RESULT" "$lume"
 check sector "$(sector)" "XYZ not ours"
 
 rm -f mmc1.img part.img dummy

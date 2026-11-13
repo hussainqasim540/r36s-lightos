@@ -1,6 +1,7 @@
 #!/lightos/bin/sh
-# R36S LightOS init: the first program of a LightOS boot (rdinit=), and the
-# same script again in the root file system.
+# Lume's init (R36S): the first program of a Lume boot (rdinit=), and the
+# same script again in the root file system. The project and its files on
+# the card are still named LightOS (lightos/).
 #
 # U-Boot passes lightos/initrd.img with our kernel (lightos/Image, built by
 # tools/build_kernel.sh) or ROCKNIX's KERNEL; that one unpacks it over its
@@ -21,14 +22,22 @@
 #   2. writes what it found to lightos/logs/boot-N on the FAT partition,
 #      with the same counter as ROCKNIX's boots (mount-storage.sh);
 #   3. shares that partition over the OTG port, like "LightOS SD via USB";
-#   4. reboots when the computer ejects it, or when no computer came.
-# U-Boot already kept LIGHTOS.TXT's token in sector 31 of the partition, so
-# the reboot goes to ROCKNIX unless the computer armed a new token.
+#   4. powers off if slot asked for it, or else reboots, when the computer
+#      ejects the card, or when no computer came: after slot within
+#      WAIT_PLUG s, otherwise within WAIT_HOST s.
+# U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT or
+# with VOL- held (boot.ini).
+#
+# With the boot logo in the initramfs (lightos/splash.fb.gz, from
+# tools/lume_logo.py), stage 1 draws it on the frame buffer and the console
+# stays quiet (the log keeps every line) until slot draws, or until a step
+# that needs the screen: the button test, kmscube, the USB disk.
 #
 # If this script stops, the kernel panics and panic=10 reboots.
 
 export PATH=/lightos/bin:/usr/bin:/usr/sbin:/bin:/sbin
 WAIT_HOST=120
+WAIT_PLUG=8
 WAIT_GONE=20
 LOG=/tmp/lightos-init.txt
 G=/sys/kernel/config/usb_gadget/lightos
@@ -43,12 +52,31 @@ mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
 mountpoint -q /sys/kernel/config || mount -t configfs configfs /sys/kernel/config 2>/dev/null
 
 up() { cut -d' ' -f1 /proc/uptime; }
-say() { echo "$*"; echo "$(up) $*" >> $LOG; }
+# The boot logo: 640x480, 32 bits a pixel (XRGB8888, as the panel's frame
+# buffer), gzipped. Only on a frame buffer with that line length.
+quiet=${LUME_QUIET:-no}
+if [ $stage = 1 ]; then
+  printf '\033[2J\033[H'
+  if [ -f /lightos/splash.fb.gz ] && [ "$(cat /sys/class/graphics/fb0/stride 2>/dev/null)" = 2560 ] &&
+     zcat /lightos/splash.fb.gz > /dev/fb0 2>/dev/null; then
+    quiet=yes
+  fi
+fi
+export LUME_QUIET=$quiet
+say() { [ $quiet = yes ] || echo "$*"; echo "$(up) $*" >> $LOG; }
+# The console again, over the logo, for a step that shows text.
+loud() {
+  if [ $quiet = yes ]; then
+    quiet=no
+    export LUME_QUIET=no
+    printf '\033[2J\033[H'
+  fi
+}
 t_init=$(up)
 
 if [ $stage = 1 ]; then
-  printf '\033[2J\033[H'
-  say "R36S LightOS (busybox initramfs, $(uname -r))"
+  say "Lume, R36S (busybox initramfs, $(uname -r))"
+  [ $quiet = yes ] && say "boot logo drawn at ${t_init} s"
   say "init started at ${t_init} s"
 else
   say "Stage 2 (root file system) started at ${t_init} s"
@@ -65,6 +93,7 @@ while [ $i -lt 50 ]; do
   i=$((i + 1))
 done
 if [ -z "$part" ]; then
+  loud
   say "No FAT partition labelled ROCKNIX: no logs, no USB disk."
   sleep 10
   reboot -f
@@ -167,6 +196,7 @@ run_kmscube() {
   echo "== exit $?, from ${t0} s to $(up) s" >> $GPU
 }
 if [ $stage = 2 ] && [ $slot = no ] && command -v kmscube >/dev/null; then
+  loud
   { echo "== /sys/class/drm"; ls /sys/class/drm
     echo "== modetest -c (connectors)"; modetest -M rockchip -c 2>&1 | head -n 20; } >> $GPU 2>&1
   # With lightos/gputrace on the card: where kmscube's first 4.8 s go
@@ -319,6 +349,7 @@ fi
 
 # 1b. The button test, when slot does not run.
 if [ $slot = no ]; then
+  loud
   say ""
   readers=
   for ev in /dev/input/event*; do
@@ -406,9 +437,9 @@ hardware() {
   echo "== uname"; uname -a
   echo "== stage"; echo $stage; cat /lightos/stage2 /etc/os-release 2>/dev/null
   echo "== cmdline"; cat /proc/cmdline
-  echo "== LIGHTOS.TXT, first line"
-  head -n 1 /flash/LIGHTOS.TXT 2>/dev/null
-  echo "== sector 31 of $part (U-Boot's copy of the token it booted)"
+  echo "== ROCKNIX.TXT, first line"
+  head -n 1 /flash/ROCKNIX.TXT 2>/dev/null
+  echo "== sector 31 of $part (U-Boot's copy of the last one-shot token it booted)"
   dd if=$part bs=512 skip=31 count=1 2>/dev/null | head -n 1
   echo "== panel node"
   panel=/proc/device-tree/dsi@ff450000/panel@0
@@ -491,12 +522,26 @@ else
   say "Could not mount $part: no logs."
 fi
 
-# 3. The partition over the OTG port.
+# 3. The partition over the OTG port, then the end: what slot asked for
+# (poweroff or reboot), or a reboot. After slot the computer has WAIT_PLUG s
+# to show up. (The rk817 charger is no sign of a cable: boot-54 had it
+# offline with the computer on the OTG port.)
+ending=reboot
+wait_host=$WAIT_HOST
+if [ -f /tmp/slot-exit ]; then
+  wait_host=$WAIT_PLUG
+  [ "$(cat /tmp/slot-exit)" = poweroff ] && ending=poweroff
+fi
+finish() {
+  say "$1"
+  sync
+  sleep ${2:-0}
+  $ending -f
+}
+loud
 UDC=$(ls -1 /sys/class/udc 2>/dev/null | head -n1)
 if [ -z "$UDC" ] || [ ! -d /sys/kernel/config/usb_gadget ]; then
-  say "No USB device controller or configfs: no USB disk."
-  sleep 10
-  reboot -f
+  finish "No USB device controller or configfs: no USB disk." 10
 fi
 
 role() {
@@ -509,8 +554,8 @@ mkdir -p $G/strings/0x409 $G/configs/c.1/strings/0x409 $G/functions/mass_storage
 echo 0x1d6b > $G/idVendor
 echo 0x0104 > $G/idProduct
 echo 0x0200 > $G/bcdUSB
-echo "R36S LightOS" > $G/strings/0x409/manufacturer
-echo "R36S SD (LightOS)" > $G/strings/0x409/product
+echo "Lume" > $G/strings/0x409/manufacturer
+echo "R36S SD (Lume)" > $G/strings/0x409/product
 echo "mass storage" > $G/configs/c.1/strings/0x409/configuration
 echo 250 > $G/configs/c.1/MaxPower
 lun=$G/functions/mass_storage.0/lun.0
@@ -522,13 +567,12 @@ ln -s $G/functions/mass_storage.0 $G/configs/c.1/
 
 role device
 if ! echo "$UDC" > $G/UDC; then
-  say "Could not start the USB disk on $UDC."
-  sleep 10
-  reboot -f
+  finish "Could not start the USB disk on $UDC." 10
 fi
 say ""
 say "SD card on the OTG port: plug in the computer"
-say "within ${WAIT_HOST} s, eject it when done."
+say "within ${wait_host} s, eject it when done."
+say "Then: ${ending}."
 
 waited=0
 seen=no
@@ -551,8 +595,8 @@ while :; do
     say "Cable gone for ${WAIT_GONE} s."
     break
   fi
-  if [ $seen = no ] && [ $waited -ge $WAIT_HOST ]; then
-    say "No computer after ${WAIT_HOST} s."
+  if [ $seen = no ] && [ $waited -ge $wait_host ]; then
+    say "No computer after ${wait_host} s."
     break
   fi
   sleep 1
@@ -561,7 +605,4 @@ done
 
 echo "" > $G/UDC 2>/dev/null
 role host
-say "Rebooting."
-sync
-sleep 2
-reboot -f
+finish "${ending}." 2

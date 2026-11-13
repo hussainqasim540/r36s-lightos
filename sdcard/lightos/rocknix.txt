@@ -1,0 +1,6 @@
+ROCKNIX boot flag, read by boot.ini. The card boots Lume at every power-on.
+When the first line is "R" and a token that is new each time the flag is
+armed, the next power-on boots ROCKNIX once for that token. U-Boot keeps
+the token it booted in sector 31 of this partition, so the power-on after
+that is Lume again. Arm it with tools/rocknix_once.sh from the computer.
+Holding VOL- at power-on boots ROCKNIX too, without the flag.

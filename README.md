@@ -1,6 +1,10 @@
-# R36S LightOS (work in progress)
+# Lume (R36S)
 
-The goal: a minimal image for the R36S that boots straight into
+![Lume](assets/logo/lume-su-chiaro.svg)
+
+Lume is the system this repo builds; it started as "R36S LightOS", and the
+files, scripts and folders on the card still say `lightos`. The goal: a
+minimal image for the R36S that boots straight into
 [slot](https://github.com/Quis03/slot-r36s), with no ArkOS underneath. A
 mainline kernel, busybox instead of systemd, no X and no EmulationStation, and
 cores built for the Cortex-A35.
@@ -17,6 +21,41 @@ last. `sdcard/` adds boot logs on the FAT partition, to work without a UART.
 LightOS stage 1, a busybox initramfs on ROCKNIX's kernel, boots once from the
 same card when `LIGHTOS.TXT` is armed, and the next power-on is ROCKNIX again
 (see [Booting LightOS once](#booting-lightos-once-next-to-rocknix)).
+Since 13 November the bench card boots Lume at every power-on, with
+ROCKNIX kept on it as the way out (see [Lume, the card's
+default](#lume-the-cards-default)).
+
+## Lume, the card's default
+
+The bench card (ROCKNIX 20250517's FAT partition and its U-Boot) boots Lume
+at every power-on: the logo at about 1 s after the kernel, slot from stage 2,
+the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
+
+- **ROCKNIX, once.** Hold **VOL-** while powering on, or run
+  `tools/rocknix_once.sh` with the card on the computer: it writes
+  `ROCKNIX.TXT`, `R` and a new token. `boot.ini` boots ROCKNIX for a token
+  it has not booted yet and keeps it in sector 31 of the partition, as the
+  LightOS one-shot did (below), so the power-on after is Lume again. Without
+  `lightos/initrd.img` it boots ROCKNIX too. `tools/test_boot_ini.sh` runs
+  every case in a U-Boot sandbox. VOL- is GPIO2 A1, `gpio input c1` for this
+  U-Boot, which names the banks A to D (`boot.ini` already reads `c22`, the
+  headphone pin, for the ODROID-GO2 revisions).
+- **The logo.** `assets/logo/` holds Lume's logo in QuisLab's style
+  (`~/dev/quislab`, decision 0001: two tones, the first letter heavy and
+  lilac with a symbol in it, the rest thin in a neutral tone, the H's
+  detached slanted bar), drawn by `tools/lume_logo.py`. `lume-avvio.svg`
+  goes into the initramfs as `lightos/splash.fb.gz` (5.5 KB): stage 1 writes
+  it to `/dev/fb0` (640x480, XRGB8888, stride 2560; the frame buffer is
+  there 0.85 s after the kernel) and keeps the console quiet until slot
+  draws. The button test, kmscube and the USB disk clear it and show their
+  text. `vt.global_cursor_default=0` hides the cursor.
+- **Power.** slot's power-off powers the console off: after the logs, the
+  card is shared over the OTG port for 8 s (`WAIT_PLUG`), and for as long as
+  a computer that showed up keeps it, then `poweroff -f` (the rk817 is the
+  system power controller). slot's restart reboots the same way. Without
+  slot (the button test), it is the 2 minutes and the reboot of before. The
+  rk817 charger is no sign of a cable: boot-54 had it offline with the
+  computer on the OTG port.
 
 ## Back up the ArkOS card first
 
@@ -202,6 +241,10 @@ To go back: copy `lightos/boot.ini.before` over `boot.ini`, and delete
 once `lightos/diag.sh` is gone.
 
 ## Booting LightOS once, next to ROCKNIX
+
+This was the bench until 13 November; `boot.ini` now boots Lume by default
+(see [Lume, the card's default](#lume-the-cards-default)) and the one-shot
+works the other way round, for ROCKNIX.
 
 LightOS stage 1 is ROCKNIX's kernel with our own userland: a static busybox
 initramfs (`initramfs/init`, built into `lightos/initrd.img`) that the kernel
