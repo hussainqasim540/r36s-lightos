@@ -34,6 +34,10 @@ HIGH = TOP - BUTTON_GAP - 2 * BUTTON - BUTTON_RISE   # A's top
 HEAVY, THIN = 52, 34         # the Q's stroke, the H's stems
 GAP = 13                     # the H's crossbar to its free stem
 SLANT = 0.9                  # the H crossbar's end: 472 across for 520 up
+# From the L's foot to the U. The other letters sit 46 apart; the foot's tip
+# is the L's only point that far right, so the U starts where the foot ends:
+# the tip is then 37 from the U's curve, and the L no longer stands apart.
+L_GAP = 0
 
 
 def poly(points, fill):
@@ -103,7 +107,7 @@ def splash():
     of the panel."""
     lilac, ink = TONES["su-scuro"]
     shapes, end = mark(lilac, ink)
-    rest, end = word(end + 46, ink, lilac)
+    rest, end = word(end + L_GAP, ink, lilac)
     k = SPLASH_WIDTH / end
     x = (SCREEN[0] - SPLASH_WIDTH) / 2
     y = SCREEN[1] / 2 - (HIGH + BASE) / 2 * k
@@ -121,7 +125,7 @@ def main():
         shapes, end = mark(lilac, ink)
         with open(os.path.join(HERE, f"lume-marchio-{name}.svg"), "w") as f:
             f.write(svg(shapes, end, pad=20))
-        rest, end = word(end + 46, ink, lilac)
+        rest, end = word(end + L_GAP, ink, lilac)
         with open(os.path.join(HERE, f"lume-{name}.svg"), "w") as f:
             f.write(svg(shapes + rest, end, top=HIGH - TOP, pad=20))
     print("wrote", ", ".join(sorted(os.listdir(HERE))))

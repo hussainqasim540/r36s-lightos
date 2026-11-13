@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -92 908 412" width="908" height="412">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -92 862 412" width="862" height="412">
   <polygon points="0,40 52,40 52,228 148,228 200,280 0,280" fill="#9D88EC"/>
-  <circle cx="311" cy="-9" r="19" fill="#9D88EC"/>
-  <circle cx="361" cy="-33" r="19" fill="#9D88EC"/>
-  <path d="M246,40 H280 V190 A56,56 0 0 0 392,190 V40 H426 V190 A90,90 0 0 1 246,190 Z" fill="#F2EEE8"/>
-  <clipPath id="m"><rect x="472" y="40" width="200" height="240"/></clipPath><path d="M489,320 V30 L572,214 L655,30 V320" fill="none" stroke="#F2EEE8" stroke-width="34" stroke-linejoin="miter" stroke-miterlimit="10" clip-path="url(#m)"/>
-  <polygon points="718,40 868,40 868,74 752,74 752,246 868,246 868,280 718,280" fill="#F2EEE8"/>
-  <polygon points="765,143 850,143 850,177 795.6,177" fill="#F2EEE8"/>
+  <circle cx="265" cy="-9" r="19" fill="#9D88EC"/>
+  <circle cx="315" cy="-33" r="19" fill="#9D88EC"/>
+  <path d="M200,40 H234 V190 A56,56 0 0 0 346,190 V40 H380 V190 A90,90 0 0 1 200,190 Z" fill="#F2EEE8"/>
+  <clipPath id="m"><rect x="426" y="40" width="200" height="240"/></clipPath><path d="M443,320 V30 L526,214 L609,30 V320" fill="none" stroke="#F2EEE8" stroke-width="34" stroke-linejoin="miter" stroke-miterlimit="10" clip-path="url(#m)"/>
+  <polygon points="672,40 822,40 822,74 706,74 706,246 822,246 822,280 672,280" fill="#F2EEE8"/>
+  <polygon points="719,143 804,143 804,177 749.6,177" fill="#F2EEE8"/>
 </svg>

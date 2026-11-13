@@ -45,7 +45,7 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   lilac, the rest thin in a neutral tone, the H's detached slanted bar; the
   U's dots are the Game Boy's A and B buttons, lilac, set as on the pad),
   drawn by `tools/lume_logo.py`. `lume-avvio.svg` goes into the initramfs
-  as `lightos/splash.fb.gz` (5.7 KB): stage 1 writes
+  as `lightos/splash.fb.gz` (6 KB): stage 1 writes
   it to `/dev/fb0` (640x480, XRGB8888, stride 2560; the frame buffer is
   there 0.85 s after the kernel) and keeps the console quiet until slot
   draws. The button test, kmscube and the USB disk clear it and show their
