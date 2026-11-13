@@ -351,8 +351,13 @@ if [ $slot = yes ]; then
     # Mesa's shader cache on the card, so that slot's shaders are compiled
     # once and not at every boot (in /tmp it starts empty each time).
     mkdir -p /tmp/data /flash/lightos/cache /tmp/slot-shims $SLOT/Logs
+    # slot's poweroff and reboot, once it has saved and synced everything:
+    # the shim notes which, and stops slot. With SIGKILL: slot then sleeps
+    # 10 s to be killed by the system, and on SIGTERM it only sets a flag
+    # that its main thread, in that sleep, does not see (boot-59, boot-60:
+    # 10 s from slot's "poweroff" to its exit).
     for c in poweroff reboot; do
-      printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -TERM $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
+      printf '#!/bin/sh\necho %s > /tmp/slot-exit\nkill -KILL $PPID\nexit 0\n' $c > /tmp/slot-shims/$c
       chmod +x /tmp/slot-shims/$c
     done
     # Full clocks while slot runs, as its ArkOS launcher does: performance

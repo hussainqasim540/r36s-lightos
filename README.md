@@ -57,7 +57,10 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   text. `vt.global_cursor_default=0` hides the cursor.
 - **Power.** slot's power-off powers the console off right after the logs
   (`poweroff -f`; the rk817 is the system power controller), and its
-  restart reboots. If slot stops by itself, the screen says so for 10 s and
+  restart reboots. Once slot has saved and synced, its `poweroff` (init's
+  shim) stops it with SIGKILL: slot then sleeps 10 s waiting for the system
+  to kill it, and SIGTERM did not end that sleep (boot-59, boot-60 took
+  10 s more). If slot stops by itself, the screen says so for 10 s and
   the console powers off. The USB disk is for development only: with
   `lightos/usbdisk` on the card, the card is shared over the OTG port first,
   for 8 s after slot (`WAIT_PLUG`) or 2 minutes without it, and for as long
