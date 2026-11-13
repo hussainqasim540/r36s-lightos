@@ -15,6 +15,9 @@
 #          variables, init samples the system into sys.txt;
 #   usbdisk  the stand-in slot with lightos/usbdisk: the USB disk step
 #          before the poweroff;
+#   volheld  VOL- held: a stand-in gpio-keys-vol (INPUT_DEVICES, INPUT_DIR)
+#          whose event file holds KEY_VOLUMEDOWN down; stage 1 has to write
+#          ROCKNIX.TXT and reboot before anything else;
 #   realslot  slot's own R36S build (SLOT_DIST, by default
 #          ~/dev/slot-r36s/dist-r36s/slot, if it is there): it has to load
 #          its libraries and stop on finding no display.
@@ -77,7 +80,7 @@ run() {  # run CASE
   mkfs.vfat -n ROCKNIX fat.img >/dev/null
   mmd -i fat.img ::lightos
   case $1 in
-    none) ;;
+    none|volheld) ;;
     trace) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
            : > gputrace; mcopy -i fat.img gputrace ::lightos/gputrace ;;
     slot|slottrace|usbdisk) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
@@ -94,12 +97,29 @@ run() {  # run CASE
   loop=$(losetup -f --show fat.img)
   mkdir -p /x; mount -t tmpfs tmpfs /x
   tar -xf /src/out/stage1.tar -C /x
+  input=
+  if [ $1 = volheld ]; then
+    mkdir -p /x/fake-input
+    printf "I: Bus=0019 Vendor=0001\nN: Name=\"rk805 pwrkey\"\nH: Handlers=kbd event0 \n\nI: Bus=0019\nN: Name=\"gpio-keys-vol\"\nH: Handlers=kbd event2 \n\n" > /x/fake-input/devices
+    { head -c 16 /dev/zero; printf "\001\000\162\000\001\000\000\000"; head -c 24 /dev/zero; } > /x/fake-input/event2
+    input="INPUT_DEVICES=/fake-input/devices INPUT_DIR=/fake-input"
+  fi
   # Its reboot -f ends the namespace: bash reports a hangup, not shown.
-  { timeout 120 unshare -p -f -m --mount-proc=/proc chroot /x /lightos/init > console-$1.txt 2>&1 || true; } 2>/dev/null
+  { timeout 120 env $input unshare -p -f -m --mount-proc=/proc chroot /x /lightos/init > console-$1.txt 2>&1 || true; } 2>/dev/null
   umount /x
   mkdir -p /mnt/$1; mount -o ro $loop /mnt/$1
   b=/mnt/$1/lightos/logs/boot-1
   echo "== $1: $(cat $b/os.txt 2>/dev/null || echo "no logs")"
+  if [ $1 = volheld ]; then
+    r=/mnt/$1/ROCKNIX.TXT
+    head -n 1 $r 2>/dev/null | sed "s/^/    ROCKNIX.TXT: /"
+    check $1 "console: VOL- held" console-$1.txt "VOL- held: restarting into ROCKNIX"
+    check $1 "ROCKNIX.TXT: R, a date and a token" $r "^R [0-9T]* [0-9a-f-]\{36\}$"
+    [ $(wc -c < $r) -ge 64 ] && echo "  ok    ROCKNIX.TXT: 64 bytes or more" || { echo "  FAIL  ROCKNIX.TXT shorter than 64 bytes"; fails=$((fails + 1)); }
+    [ -d $b ] && { echo "  FAIL  logs written: it went on"; fails=$((fails + 1)); } || echo "  ok    rebooted before the logs"
+    umount /mnt/$1; losetup -d $loop
+    return
+  fi
   sed "s/^[0-9.]* /    /" $b/init.txt 2>/dev/null | grep -E "Root file system|Could not|Stage 2|GPU|seedrng|slot:" || true
   case $1 in
     good)
@@ -170,6 +190,7 @@ run bad
 [ -f /src/out/rootfs/rootfs.sqfs ] && run slot
 [ -f /src/out/rootfs/rootfs.sqfs ] && run slottrace
 [ -f /src/out/rootfs/rootfs.sqfs ] && run usbdisk
+run volheld
 [ -f /src/out/rootfs/rootfs.sqfs ] && [ -f /slot/System/slot ] && run realslot
 [ $fails = 0 ] && echo "All checks passed." || { echo "$fails checks failed."; exit 1; }
 '

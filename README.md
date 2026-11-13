@@ -31,19 +31,20 @@ The bench card (ROCKNIX 20250517's FAT partition and its U-Boot) boots Lume
 at every power-on: the logo at about 1 s after the kernel, slot from stage 2,
 the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
 
-- **ROCKNIX, once.** Hold **VOL-** while powering on, or run
-  `tools/rocknix_once.sh` with the card on the computer: it writes
-  `ROCKNIX.TXT`, `R` and a new token. `boot.ini` boots ROCKNIX for a token
-  it has not booted yet and keeps it in sector 31 of the partition, as the
-  LightOS one-shot did (below), so the power-on after is Lume again. Without
-  `lightos/initrd.img` it boots ROCKNIX too. `tools/test_boot_ini.sh` runs
-  every case in a U-Boot sandbox. VOL- is GPIO2 A1, active low with the
-  SoC's pull-up. `gpio input c1` alone (this U-Boot names the banks A to D)
-  did nothing on the console (boot-56, boot-57), so `boot.ini` also turns
-  the pull-up on and reads the pin from GPIO2's registers, and either
-  reading is enough. Both go to sector 30 of the partition (`LUMEDIAG`),
-  which Lume's `hardware.txt` and ROCKNIX's log folder
-  (`uboot-sector30.bin`) copy.
+- **ROCKNIX, once.** Hold **VOL-** while powering on, until the logo
+  gives way to a line of text, or run `tools/rocknix_once.sh` with the card
+  on the computer. Both write `ROCKNIX.TXT`, `R` and a new token, and
+  `boot.ini` boots ROCKNIX for a token it has not booted yet and keeps it in
+  sector 31 of the partition, as the LightOS one-shot did (below), so the
+  power-on after is Lume again. Without `lightos/initrd.img` it boots
+  ROCKNIX too. `tools/test_boot_ini.sh` runs every case in a U-Boot sandbox.
+  VOL- is read by Lume's stage 1, not by U-Boot: `gpio input c1` (GPIO2 A1;
+  this U-Boot names the banks A to D) never saw the key (boot-56, boot-57),
+  and reading GPIO2's registers from `boot.ini` hung U-Boot on a black
+  screen. gpio-keys is up at 1.01 s and reports the keys already down when
+  its event device is opened, so stage 1 checks for KEY_VOLUMEDOWN as soon
+  as it finds the FAT partition, writes `ROCKNIX.TXT` and reboots
+  (`tools/test_init_stages.sh`, case volheld).
 - **The logo.** `assets/logo/` holds Lume's logo in QuisLab's style
   (`~/dev/quislab`, decision 0001: two tones, the first letter heavy and
   lilac, the rest thin in a neutral tone, the H's detached slanted bar; the

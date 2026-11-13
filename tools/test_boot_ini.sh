@@ -3,8 +3,7 @@
 # against a FAT32 image laid out like the ROCKNIX card, and checks that it
 # boots Lume by default and ROCKNIX once for ROCKNIX.TXT or with VOL- held:
 # which kernel arguments and initrd booti would get, what U-Boot leaves in
-# sectors 30 and 31 of the partition, and that it never changes the file
-# system.
+# sector 31 of the partition, and that it never changes the file system.
 #
 # The sandbox's commands are newer than the console's 2017 U-Boot. This
 # checks the script's logic; the script only reads files and writes one raw
@@ -52,28 +51,21 @@ cd /t
 # and "mmc write" (v2024.10 passes the address as a host pointer, without
 # map_sysmem), so they become "read/write mmc 1:0": the same raw blocks of
 # the same device.
-# VOL- is read twice and the sandbox has neither the pin nor the SoC
-# registers: "gpio input c1" becomes $1 (false, or true when held), the
-# ext_port of GPIO2 $2 (2, or 0 when held), the other registers 0, and the
-# write to the pull register goes.
+# VOL- ("gpio input c1") becomes false, or true for held.scr: the sandbox
+# has no such pin.
 script() {
   tail -n +2 boot.ini | sed -e "s/^booti /echo RESULT /" \
     -e "s/if mmc read /if read mmc 1:0 /" -e "s/if mmc write /if write mmc 1:0 /" \
-    -e "s/^if gpio input c1; then/if $1; then/" \
-    -e "/^mw.l 0xff/d" \
-    -e "s/^setexpr.l vol_port \*0xff260050\$/setenv vol_port $2/" \
-    -e "s/^setexpr.l \(vol_[a-z0-9]*\) \*0xff.*/setenv \1 0/" > boot.cmd
+    -e "s/^if gpio input c1; then/if $1; then/" > boot.cmd
   grep -q "read mmc 1:0" boot.cmd && grep -q "write mmc 1:0" boot.cmd && grep -q "^if $1; then" boot.cmd
-  grep -q "^setenv vol_port $2\$" boot.cmd && ! grep -q "0xff" boot.cmd
   echo "echo ARGS \${bootargs}" >> boot.cmd
   echo "echo DTBO \${dtbo}" >> boot.cmd
   echo "echo DTB \${dtb_file}" >> boot.cmd
   echo "fdt print /dsi@ff450000/panel@0 panel_description" >> boot.cmd
-  mkimage -A sandbox -T script -C none -d boot.cmd $3 >/dev/null
+  mkimage -A sandbox -T script -C none -d boot.cmd $2 >/dev/null
 }
-script false 2 boot.scr
-script true 0 held.scr
-script false 0 port.scr
+script false boot.scr
+script true held.scr
 
 # 300 MB image, one FAT32 partition with 4 KiB clusters, like the card.
 OFF=$((2048 * 512))
@@ -108,7 +100,6 @@ make_image() {
   fi
   mcopy -i "$I" boot.scr ::boot.scr
   mcopy -i "$I" held.scr ::held.scr
-  mcopy -i "$I" port.scr ::port.scr
 }
 flag() {
   { echo "R $1 0123456789abcdef0123456789abcdef"; echo "rest of the file, long enough for the 64 bytes U-Boot compares"; } > ROCKNIX.TXT
@@ -134,11 +125,8 @@ fsck_ok() {
   dd if=mmc1.img of=part.img bs=512 skip=2048 2>/dev/null
   fsck.vfat -n part.img > fsck.txt 2>&1 && echo clean || { echo damaged; sed "s/^/        /" fsck.txt >&2; }
 }
-# Sector 30: the magic and the choice word (1 Lume, 0 ROCKNIX).
-diag() { dd if=mmc1.img bs=512 skip=$((2048 + 30)) count=1 2>/dev/null | head -c 8
-         echo " $(dd if=mmc1.img bs=1 skip=$(( (2048 + 30) * 512 + 36 )) count=1 2>/dev/null | od -An -tu1 | tr -d " ")"; }
-# The partition without sectors 30 and 31, to check nothing else was written.
-others() { dd if=mmc1.img bs=512 skip=2048 2>/dev/null | dd bs=512 count=30 2>/dev/null | md5sum | cut -c1-8
+# The partition without sector 31, to check nothing else was written.
+others() { dd if=mmc1.img bs=512 skip=2048 2>/dev/null | dd bs=512 count=31 2>/dev/null | md5sum | cut -c1-8
            dd if=mmc1.img bs=512 skip=$((2048 + 32)) 2>/dev/null | md5sum | cut -c1-8; }
 rocknix="RESULT 0x02000000 - 0x01f00000"
 lume="RESULT 0x02000000 0x04000000 0x01f00000"
@@ -150,7 +138,6 @@ make_image; before=$(others); run
 check booti "$RESULT" "$lume"
 check args "$ARGS" "$largs"
 check sector "$(sector)" ""
-check "sector 30" "$(diag)" "LUMEDIAG 1"
 check "kernel (no lightos/Image)" "$(grep -c "^1000000 bytes read" out.txt)" 1
 check "overlay (no lightos/mipi-panel.dtbo)" "$DTBO" "DTBO overlays/mipi-panel.dtbo"
 check "device tree" "$TREE" "DTB rk3326-gameconsole-r36s.dtb"
@@ -167,19 +154,9 @@ make_image; run held
 check booti "$RESULT" "$rocknix"
 check args "$(rargs)" rocknix
 check sector "$(sector)" ""
-check "sector 30" "$(diag)" "LUMEDIAG 0"
 echo "VOL- released"
 run
 check booti "$RESULT" "$lume"
-check "sector 30" "$(diag)" "LUMEDIAG 1"
-
-echo "VOL- held, seen by the register only (gpio command fails)"
-make_image; before=$(others); run port
-check booti "$RESULT" "$rocknix"
-check args "$(rargs)" rocknix
-check "sector 30" "$(diag)" "LUMEDIAG 0"
-check "rest of the partition" "$(others)" "$before"
-check "file system" "$(fsck_ok)" clean
 
 echo "ROCKNIX.TXT armed with token A"
 make_image; flag A; before=$(others); run

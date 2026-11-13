@@ -29,8 +29,9 @@
 # the computer ejects the card, or when no computer came: after slot within
 # WAIT_PLUG s, otherwise within WAIT_HOST s; without slot's word it then
 # reboots.
-# U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT or
-# with VOL- held (boot.ini).
+# U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT
+# (boot.ini). VOL- held at power-on writes one: stage 1 checks the key as
+# soon as it finds the FAT partition, writes ROCKNIX.TXT and reboots.
 #
 # With the boot logo in the initramfs (lightos/splash.fb.gz, from
 # tools/lume_logo.py), stage 1 draws it on the frame buffer and the console
@@ -101,6 +102,47 @@ if [ -z "$part" ]; then
   say "No FAT partition labelled ROCKNIX: no logs, no USB disk."
   sleep 10
   reboot -f
+fi
+
+# VOL- held at power-on: ROCKNIX, once. boot.ini's "gpio input c1" does
+# not see the key on this console (boot-56, boot-57), and reading GPIO2's
+# registers from boot.ini hung U-Boot (a black screen), so Lume reads it.
+# gpio-keys reports the keys already down when its event device is opened:
+# an EV_KEY event for KEY_VOLUMEDOWN (114) with value 1. If it comes,
+# init writes ROCKNIX.TXT as tools/rocknix_once.sh does, "R" and a new
+# token, and reboots; boot.ini boots ROCKNIX for a token it has not booted
+# yet. INPUT_DEVICES and INPUT_DIR are for tools/test_init_stages.sh.
+INPUT_DEVICES=${INPUT_DEVICES:-/proc/bus/input/devices}
+INPUT_DIR=${INPUT_DIR:-/dev/input}
+vol_down_held() {
+  ev=$(awk '/^N: Name="gpio-keys-vol"/ { f = 1 }
+            f && /^H: Handlers=/ { for (i = 2; i <= NF; i++) if ($i ~ /^event/) { print $i; exit } }
+            /^$/ { f = 0 }' $INPUT_DEVICES 2>/dev/null)
+  [ -n "$ev" ] && [ -e $INPUT_DIR/$ev ] || return 1
+  rm -f /tmp/vol.bin
+  dd if=$INPUT_DIR/$ev of=/tmp/vol.bin bs=24 count=4 2>/dev/null &
+  pid=$!
+  usleep 150000
+  kill $pid 2>/dev/null
+  wait $pid 2>/dev/null
+  # struct input_event on arm64: 16 bytes of time, then type, code, value.
+  hexdump -v -e '24/1 "%02x" "\n"' /tmp/vol.bin 2>/dev/null | grep -q '0100720001000000$'
+}
+if [ $stage = 1 ] && vol_down_held; then
+  loud
+  say "VOL- held: restarting into ROCKNIX, once."
+  if mount -t vfat -o rw "$part" /flash; then
+    {
+      echo "R $(date +%Y%m%dT%H%M%S) $(cat /proc/sys/kernel/random/uuid)"
+      cat /flash/lightos/rocknix.txt 2>/dev/null
+      echo "Written by Lume's init: VOL- was held at power-on."
+    } > /flash/ROCKNIX.TXT
+    sync
+    umount /flash
+    sleep 1
+    reboot -f
+  fi
+  say "Could not mount $part: going on with Lume."
 fi
 
 # 0. Stage 1 hands over to the root file system on the card, if there is
@@ -447,8 +489,6 @@ hardware() {
   head -n 1 /flash/ROCKNIX.TXT 2>/dev/null
   echo "== sector 31 of $part (U-Boot's copy of the last one-shot token it booted)"
   dd if=$part bs=512 skip=31 count=1 2>/dev/null | head -n 1
-  echo "== sector 30 of $part (U-Boot's VOL- readings, boot.ini)"
-  dd if=$part bs=512 skip=30 count=1 2>/dev/null | hexdump -C | head -n 3
   echo "== panel node"
   panel=/proc/device-tree/dsi@ff450000/panel@0
   tr '\0' ' ' < $panel/compatible; echo
