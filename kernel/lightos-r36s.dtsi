@@ -19,3 +19,15 @@
 	center-supply = <&vdd_logic>;
 	status = "okay";
 };
+
+/*
+ * The headphone jack's detection pin, GPIO2 PC6, reads high with nothing
+ * plugged in on this R36S: rk3326-gameconsole-r3xs.dtsi has it active high,
+ * so "Headphones" read as plugged in all the time, and slot played at its
+ * headphone volume, which was 0, and never opened the codec (boot-47 to
+ * boot-50). ArkOS's tree (rk3326-r35s-linux.dtb) has the same pin active
+ * low.
+ */
+&{/rk817-sound} {
+	simple-audio-card,hp-det-gpios = <&gpio2 RK_PC6 GPIO_ACTIVE_LOW>;
+};
