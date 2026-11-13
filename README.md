@@ -722,6 +722,26 @@ panel was up, which is about when cpufreq takes the CPU to its top OPP.
 LightOS stays at 1296 MHz. With it, boot-47 had slot's first frame at
 1.65 s, slot having started at 1.90 s after the kernel.
 
+### 60 frames a second: what cost the frames
+
+In steady play of Kirby, slot missed 22 to 28 flips in every 600 frames
+(boot-49), against about 5 on ArkOS. Its audio ring starved for about
+2400 samples a second. The clocks held (CPU 1296 MHz, GPU 560 MHz) and
+nothing throttled (47 to 52 C). `lightos/slottrace` on the card runs slot
+with its traces and samples the system (see the comment in
+`initramfs/init`). Three boots narrowed it down:
+
+| Boot | What it showed |
+|---|---|
+| boot-50 | Every missed flip had the frontend's advance step at 20 to 48 ms, against 0.1 ms in other frames. The emulator thread never took over 8 ms (gpSP 3 ms a frame) and drawing took 2 to 3 ms. |
+| boot-52 | strace on slot's threads for 20 s: 40 calls to `close()` on `/dev/input/event1` took 37 to 41 ms each, on the main thread. That is the codec's Headphones jack, which slot opened, read and closed every 500 ms. On the mainline kernel, closing an evdev node waits for an RCU grace period (`input_close_device`). The main thread also opened the `Bezels/GBA` folder on the card twice a frame (2176 times in 20 s). |
+| boot-53 | With slot-r36s 9d7fb36 (the jack's event device kept open, the bezel list cached until the folder changes): no missed flips in 9 of the 11 windows outside strace's 20 s, and 1 in the window with the game's launch. The worst frame's work went from 25 to 54 ms down to 6.2 to 6.6 ms. The audio ring did not starve outside the launch and strace's window. |
+
+The jack itself read wrong: `rk3326-gameconsole-r3xs.dtsi` has its
+detection pin, GPIO2 PC6, active high. On this R36S it reads high with
+nothing plugged in, so slot used its headphone volume. ArkOS's tree has the
+pin active low, and so does `lightos-r36s.dtsi` now.
+
 ## Next steps
 
 1. Make the LightOS kernel ours: only the drivers the R36S uses, built in,
@@ -738,7 +758,8 @@ LightOS stays at 1296 MHz. With it, boot-47 had slot's first frame at
    keeps ROCKNIX's bootloader.
 3. Boot into slot from init in a few seconds, with clocks and the cpufreq
    governor managed by slot: slot's first frame is at 3.6 s after the
-   kernel (boot-47), 1.65 s of it in slot's own start-up.
+   kernel (boot-47), 1.65 s of it in slot's own start-up. In play it holds
+   60 fps without missed flips or audio gaps (boot-53).
 4. Overclocking: extra OPPs for CPU, GPU and DDR in the device tree, tested one
    step at a time. The DDR at 666 MHz works; the CPU at 1512 MHz and
    1.35 V does not boot.
