@@ -41,10 +41,12 @@ the game on screen about 3.6 s after the kernel, at 60 fps (boot-53, boot-54).
   VOL- is read by Lume's stage 1, not by U-Boot: `gpio input c1` (GPIO2 A1;
   this U-Boot names the banks A to D) never saw the key (boot-56, boot-57),
   and reading GPIO2's registers from `boot.ini` hung U-Boot on a black
-  screen. gpio-keys is up at 1.01 s and reports the keys already down when
-  its event device is opened, so stage 1 checks for KEY_VOLUMEDOWN as soon
-  as it finds the FAT partition, writes `ROCKNIX.TXT` and reboots
-  (`tools/test_init_stages.sh`, case volheld).
+  screen. The event device does not tell either: gpio-keys reports the keys
+  already down only to its first opener, the console's `kbd` handler
+  (boot-58 to boot-60). So stage 1, as soon as it finds the FAT partition,
+  reads the line from debugfs's gpio list (`|VOLUMEDOWN ... in  lo` when
+  held; the line goes to `init.txt` at every boot), writes `ROCKNIX.TXT`
+  and reboots (`tools/test_init_stages.sh`, case volheld).
 - **The logo.** `assets/logo/` holds Lume's logo in QuisLab's style
   (`~/dev/quislab`, decision 0001: two tones, the first letter heavy and
   lilac, the rest thin in a neutral tone, the H's detached slanted bar; the

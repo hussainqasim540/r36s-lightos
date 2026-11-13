@@ -107,26 +107,23 @@ fi
 # VOL- held at power-on: ROCKNIX, once. boot.ini's "gpio input c1" does
 # not see the key on this console (boot-56, boot-57), and reading GPIO2's
 # registers from boot.ini hung U-Boot (a black screen), so Lume reads it.
-# gpio-keys reports the keys already down when its event device is opened:
-# an EV_KEY event for KEY_VOLUMEDOWN (114) with value 1. If it comes,
-# init writes ROCKNIX.TXT as tools/rocknix_once.sh does, "R" and a new
-# token, and reboots; boot.ini boots ROCKNIX for a token it has not booted
-# yet. INPUT_DEVICES and INPUT_DIR are for tools/test_init_stages.sh.
-INPUT_DEVICES=${INPUT_DEVICES:-/proc/bus/input/devices}
-INPUT_DIR=${INPUT_DIR:-/dev/input}
+# Not from the event device: gpio-keys reports the keys already down only
+# to its first opener, the console's kbd handler at 1.01 s (boot-58 to
+# boot-60 saw nothing). debugfs's gpio list gives each requested line's
+# level as the pin reads it: VOL- is active low, so held is "in  lo". The
+# line goes to the log at every boot. If held, init writes ROCKNIX.TXT as
+# tools/rocknix_once.sh does, "R" and a new token, and reboots; boot.ini
+# boots ROCKNIX for a token it has not booted yet. GPIO_DEBUG is for
+# tools/test_init_stages.sh.
+GPIO_DEBUG=${GPIO_DEBUG:-/sys/kernel/debug/gpio}
 vol_down_held() {
-  ev=$(awk '/^N: Name="gpio-keys-vol"/ { f = 1 }
-            f && /^H: Handlers=/ { for (i = 2; i <= NF; i++) if ($i ~ /^event/) { print $i; exit } }
-            /^$/ { f = 0 }' $INPUT_DEVICES 2>/dev/null)
-  [ -n "$ev" ] && [ -e $INPUT_DIR/$ev ] || return 1
-  rm -f /tmp/vol.bin
-  dd if=$INPUT_DIR/$ev of=/tmp/vol.bin bs=24 count=4 2>/dev/null &
-  pid=$!
-  usleep 150000
-  kill $pid 2>/dev/null
-  wait $pid 2>/dev/null
-  # struct input_event on arm64: 16 bytes of time, then type, code, value.
-  hexdump -v -e '24/1 "%02x" "\n"' /tmp/vol.bin 2>/dev/null | grep -q '0100720001000000$'
+  [ -e $GPIO_DEBUG ] || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+  line=$(grep '|VOLUMEDOWN ' $GPIO_DEBUG 2>/dev/null)
+  say "VOL-:${line:- no VOLUMEDOWN line in $GPIO_DEBUG}"
+  case "$line" in
+    *") in  lo "*) return 0 ;;
+  esac
+  return 1
 }
 if [ $stage = 1 ] && vol_down_held; then
   loud

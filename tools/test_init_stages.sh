@@ -15,9 +15,9 @@
 #          variables, init samples the system into sys.txt;
 #   usbdisk  the stand-in slot with lightos/usbdisk: the USB disk step
 #          before the poweroff;
-#   volheld  VOL- held: a stand-in gpio-keys-vol (INPUT_DEVICES, INPUT_DIR)
-#          whose event file holds KEY_VOLUMEDOWN down; stage 1 has to write
-#          ROCKNIX.TXT and reboot before anything else;
+#   volheld  VOL- held: a stand-in for debugfs's gpio list (GPIO_DEBUG)
+#          with VOLUMEDOWN low; stage 1 has to write ROCKNIX.TXT and reboot
+#          before anything else;
 #   realslot  slot's own R36S build (SLOT_DIST, by default
 #          ~/dev/slot-r36s/dist-r36s/slot, if it is there): it has to load
 #          its libraries and stop on finding no display.
@@ -99,10 +99,9 @@ run() {  # run CASE
   tar -xf /src/out/stage1.tar -C /x
   input=
   if [ $1 = volheld ]; then
-    mkdir -p /x/fake-input
-    printf "I: Bus=0019 Vendor=0001\nN: Name=\"rk805 pwrkey\"\nH: Handlers=kbd event0 \n\nI: Bus=0019\nN: Name=\"gpio-keys-vol\"\nH: Handlers=kbd event2 \n\n" > /x/fake-input/devices
-    { head -c 16 /dev/zero; printf "\001\000\162\000\001\000\000\000"; head -c 24 /dev/zero; } > /x/fake-input/event2
-    input="INPUT_DEVICES=/fake-input/devices INPUT_DIR=/fake-input"
+    # As gpiolib prints it (gpiolib_dbg_show in 7.1.2).
+    printf "gpiochip2: GPIOs 64-95, parent: platform/ff260000.gpio, gpio2:\n gpio-64  (                    |VOLUMEUP            ) in  hi IRQ ACTIVE LOW\n gpio-65  (                    |VOLUMEDOWN          ) in  lo IRQ ACTIVE LOW\n" > /x/fake-gpio
+    input="GPIO_DEBUG=/fake-gpio"
   fi
   # Its reboot -f ends the namespace: bash reports a hangup, not shown.
   { timeout 120 env $input unshare -p -f -m --mount-proc=/proc chroot /x /lightos/init > console-$1.txt 2>&1 || true; } 2>/dev/null
@@ -114,6 +113,7 @@ run() {  # run CASE
     r=/mnt/$1/ROCKNIX.TXT
     head -n 1 $r 2>/dev/null | sed "s/^/    ROCKNIX.TXT: /"
     check $1 "console: VOL- held" console-$1.txt "VOL- held: restarting into ROCKNIX"
+    lacks $1 "console: the VOLUMEDOWN line was found" console-$1.txt "VOL-: no VOLUMEDOWN line"
     check $1 "ROCKNIX.TXT: R, a date and a token" $r "^R [0-9T]* [0-9a-f-]\{36\}$"
     [ $(wc -c < $r) -ge 64 ] && echo "  ok    ROCKNIX.TXT: 64 bytes or more" || { echo "  FAIL  ROCKNIX.TXT shorter than 64 bytes"; fails=$((fails + 1)); }
     [ -d $b ] && { echo "  FAIL  logs written: it went on"; fails=$((fails + 1)); } || echo "  ok    rebooted before the logs"
@@ -181,6 +181,7 @@ run() {  # run CASE
       ends $1 ;;
   esac
   [ $1 = bad ] && check $1 "init.txt: could not mount" $b/init.txt "Could not mount lightos/rootfs.sqfs"
+  check $1 "init.txt: the VOL- reading" $b/init.txt "VOL-:"
   umount /mnt/$1; losetup -d $loop
 }
 run none
