@@ -9,7 +9,7 @@ stage1=$BR2_EXTERNAL_LIGHTOS_PATH/../out/stage1.tar
 [ -f "$stage1" ] || { echo "No $stage1: run tools/build_initramfs.sh first" >&2; exit 1; }
 rm -rf "$target/lightos"
 tar -xf "$stage1" -C "$target"
-mkdir -p "$target/flash"
+mkdir -p "$target/flash" "$target/games"
 # slot writes /data/slot-card.log and /data/slot-repair.result; the root is
 # read-only, so /data is a link to a folder init makes in /tmp.
 ln -sfn /tmp/data "$target/data"

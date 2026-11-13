@@ -704,6 +704,45 @@ inverted. It does not matter for the speaker, which uses the same
 output. It needs checking with real headphones before slot relies on
 it.
 
+## A games partition on a big card
+
+A ROCKNIX card has two partitions: `ROCKNIX`, FAT, 2 GB (the one the
+computer sees, in a reader or over the USB disk), and `STORAGE`, ROCKNIX's
+ext4 `/storage`, which takes the rest: about 30 GB on a 32 GB card, that
+macOS can't write. `tools/games_partition.sh` shrinks `STORAGE` (4 GiB by
+default) and makes the rest a third partition, FAT32 labelled `GAMES`.
+Lume finds it by its label: it mounts it read-write on `/games` while the
+frontend runs (`utf8`, so names like "Pokémon" stay as written), and the USB
+disk shares it as a second disk next to `ROCKNIX`; the USB step ends once
+the computer has ejected both. Without a `GAMES` partition nothing changes.
+FAT32 because the kernel has vfat and no exFAT; its 4 GB limit for a file
+is far above a DS game (512 MB at most).
+
+The script works on an image of the card, never on the card: with the card
+in a reader,
+
+```bash
+diskutil list external physical          # the card, e.g. /dev/disk4
+diskutil unmountDisk /dev/disk4
+sudo dd if=/dev/rdisk4 of=$HOME/r36s-card.img bs=4m status=progress
+sudo chown $USER $HOME/r36s-card.img
+tools/games_partition.sh --check ~/r36s-card.img     # the partitions, STORAGE's use
+cp -c ~/r36s-card.img ~/r36s-card-games.img          # APFS clone: no copy
+tools/games_partition.sh ~/r36s-card-games.img 4     # STORAGE in GiB
+sudo python3 tools/write_changes.py ~/r36s-card.img ~/r36s-card-games.img /dev/rdisk4
+```
+
+`r36s-card.img` stays as it was: it is the backup (to restore it,
+`sudo dd if=$HOME/r36s-card.img of=/dev/rdisk4 bs=4m`). The script checks
+`STORAGE` with e2fsck, shrinks it with resize2fs, rewrites the table (MBR
+or GPT), formats `GAMES`, and checks that the boot loader and `ROCKNIX` are
+byte for byte the same and that `STORAGE` checks clean. `write_changes.py`
+writes only the 4 MiB blocks that changed, after making sure the device is
+an external disk of the image's size that still holds the dump there, and
+reads each one back. `tools/test_games_partition.sh` runs it all on two
+made-up cards (MBR and GPT) with files past the new end of `STORAGE`.
+ROCKNIX, booted once, still has its `/storage`, smaller.
+
 ## slot on LightOS
 
 With `slot/` on the FAT partition, stage 2 starts slot in place of the

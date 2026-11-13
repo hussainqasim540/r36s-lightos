@@ -23,7 +23,9 @@
 #          its libraries and stop on finding no display;
 #   vesper  lightos/frontend says "vesper" and a stand-in vesper/bin/vesper
 #          asks for poweroff: init starts it with VESPER_ROOT, its poweroff
-#          ends it, and slot (also on the card) does not run;
+#          ends it, and slot (also on the card) does not run; a second
+#          image labelled GAMES is on /games for it, read-write, with UTF-8
+#          names;
 #   realvesper  Vesper's own build (VESPER_DIST, by default
 #          ~/dev/r36s-handheld/build/card/vesper, if it is there): it has to
 #          load its libraries and stop on finding no display.
@@ -48,6 +50,7 @@ VESPER_DIST=${VESPER_DIST:-$HOME/dev/r36s-handheld/build/card/vesper}
 [ -f "$VESPER_DIST/bin/vesper" ] && slot_mount="$slot_mount -v $VESPER_DIST:/vesper:ro"
 docker run --rm --privileged -v "$here:/src:ro" $slot_mount debian:trixie bash -euc '
 apt-get update -qq && apt-get install -y -qq squashfs-tools dosfstools mtools util-linux >/dev/null 2>&1
+export LANG=C.UTF-8  # mtools writes the UTF-8 names as such
 w=/work; mkdir -p $w; cd $w
 
 if [ -f /src/out/rootfs/rootfs.sqfs ]; then
@@ -106,7 +109,7 @@ run() {  # run CASE
     vesper) mcopy -i fat.img good.sqfs ::lightos/rootfs.sqfs
           printf "vesper\r\n" > frontend; mcopy -i fat.img frontend ::lightos/frontend
           mkdir -p fakev/bin fake/System
-          printf "#!/bin/sh\necho \"stand-in vesper, root \$VESPER_ROOT, slot root \${SLOT_ROOT:-none}\"\nsleep 5\npoweroff\nsleep 30\necho not stopped\n" > fakev/bin/vesper
+          printf "#!/bin/sh\necho \"stand-in vesper, root \$VESPER_ROOT, slot root \${SLOT_ROOT:-none}\"\nls /games\n: > /games/written\nsleep 5\npoweroff\nsleep 30\necho not stopped\n" > fakev/bin/vesper
           printf "#!/bin/sh\necho slot ran\n" > fake/System/slot
           chmod +x fakev/bin/vesper fake/System/slot
           mcopy -s -i fat.img fakev ::vesper
@@ -117,6 +120,15 @@ run() {  # run CASE
     *) mcopy -i fat.img $1.sqfs ::lightos/rootfs.sqfs ;;
   esac
   loop=$(losetup -f --show fat.img)
+  gloop=
+  if [ $1 = vesper ]; then
+    rm -f games.img
+    dd if=/dev/zero of=games.img bs=1M count=16 status=none
+    mkfs.vfat -n GAMES games.img >/dev/null
+    mmd -i games.img ::NDS
+    : > game; mcopy -i games.img game "::NDS/Pokémon Zeta.nds"
+    gloop=$(losetup -f --show games.img)
+  fi
   mkdir -p /x; mount -t tmpfs tmpfs /x
   tar -xf /src/out/stage1.tar -C /x
   input=
@@ -199,6 +211,14 @@ run() {  # run CASE
       lacks $1 "vesper.log: its poweroff stopped it" $b/vesper.log "not stopped"
       lacks $1 "slot did not run" $b/init.txt "slot: started"
       check $1 "vesper/logs/vesper.log: copied from /tmp" /mnt/$1/vesper/logs/vesper.log "stand-in vesper"
+      check $1 "init.txt: GAMES found" $b/init.txt "Games partition (GAMES): $gloop"
+      check $1 "init.txt: GAMES on /games" $b/init.txt "vesper: $gloop on /games"
+      check $1 "vesper.log: /games has the games" $b/vesper.log "^NDS$"
+      mkdir -p /mnt/g; mount -o ro,utf8 $gloop /mnt/g
+      ls /mnt/g /mnt/g/NDS > games-ls.txt
+      umount /mnt/g; losetup -d $gloop
+      check $1 "GAMES: vesper wrote to it" games-ls.txt "^written$"
+      check $1 "GAMES: the UTF-8 name kept" games-ls.txt "^Pokémon Zeta.nds$"
       ends $1 ;;
     realvesper)
       echo "    vesper.log:"; sed "s/^/      /" $b/vesper.log | head -n 12

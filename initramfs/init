@@ -25,9 +25,12 @@
 #   3. powers off, or reboots, as the frontend asked, at once. If it
 #      stopped by itself, or there is none, it says so for 10 s and powers
 #      off (a reboot could loop).
+# A card can also have a games partition, FAT and labelled GAMES (the rest
+# of a big card): it is mounted on /games while the frontend runs, for its
+# ROMs, and the USB disk shares it too.
 # With lightos/usbdisk on the card (development), step 3 first shares that
-# partition over the OTG port, like "LightOS SD via USB", and goes on when
-# the computer ejects the card, or when no computer came: after the
+# partition (and GAMES) over the OTG port, like "LightOS SD via USB", and goes
+# on when the computer ejects them, or when no computer came: after the
 # frontend within WAIT_PLUG s, otherwise within WAIT_HOST s; without its
 # word it then reboots.
 # U-Boot boots Lume at every power-on, and ROCKNIX once for ROCKNIX.TXT
@@ -104,6 +107,10 @@ if [ -z "$part" ]; then
   sleep 10
   reboot -f
 fi
+# The games partition, if there is one. The card's partitions show up
+# together, so it is there by now.
+games=$(findfs LABEL=GAMES 2>/dev/null) && [ -b "$games" ] || games=
+[ $stage = 2 ] && [ -n "$games" ] && say "Games partition (GAMES): $games"
 
 # VOL- held at power-on: ROCKNIX, once. boot.ini's "gpio input c1" does
 # not see the key on this console (boot-56, boot-57), and reading GPIO2's
@@ -358,6 +365,17 @@ FE=/flash/$fe
 if [ $fe_run = yes ]; then
   if mount -t vfat -o rw,noatime "$part" /flash; then
     mountpoint -q /run || mount -t tmpfs tmpfs /run
+    # The games partition on /games, read-write (the frontend may keep
+    # files next to the ROMs). utf8: names like "Pokémon" as the computer
+    # wrote them, not in the kernel's default latin-1.
+    if [ -n "$games" ]; then
+      mkdir -p /games 2>/dev/null
+      if mount -t vfat -o rw,noatime,utf8 "$games" /games; then
+        say "$fe: $games on /games"
+      else
+        say "$fe: could not mount $games on /games"
+      fi
+    fi
     # Mesa's shader cache on the card, so that the frontend's shaders are
     # compiled once and not at every boot (in /tmp it starts empty each time).
     mkdir -p /tmp/data /flash/lightos/cache /tmp/fe-shims $FE/$fe_logs
@@ -410,6 +428,7 @@ if [ $fe_run = yes ]; then
     fi
     cp /tmp/$fe.log $FE/$fe_logs/$fe.log
     sync
+    mountpoint -q /games && umount /games
     umount /flash
   else
     say "$fe: could not mount $part read-write"
@@ -594,7 +613,8 @@ fi
 
 # 3. The end: what the frontend asked for (poweroff or reboot). Without its
 # word, poweroff, or with lightos/usbdisk a reboot, as before that file. With
-# lightos/usbdisk, the partition goes on the OTG port first; after it the
+# lightos/usbdisk, the partition (and GAMES, as a second disk) goes on the
+# OTG port first, until the computer has ejected both; after it the
 # computer has WAIT_PLUG s to show up. (The rk817 charger is no sign of a
 # cable: boot-54 had it offline with the computer on the OTG port.)
 ending=poweroff
@@ -643,6 +663,14 @@ echo 1 > $lun/removable
 echo 0 > $lun/ro
 echo 0 > $lun/cdrom
 echo "$part" > $lun/file
+if [ -n "$games" ]; then
+  lun1=$G/functions/mass_storage.0/lun.1
+  mkdir -p $lun1
+  echo 1 > $lun1/removable
+  echo 0 > $lun1/ro
+  echo 0 > $lun1/cdrom
+  echo "$games" > $lun1/file
+fi
 ln -s $G/functions/mass_storage.0 $G/configs/c.1/
 
 role device
@@ -651,7 +679,11 @@ if ! echo "$UDC" > $G/UDC; then
 fi
 say ""
 say "SD card on the OTG port: plug in the computer"
-say "within ${wait_host} s, eject it when done."
+if [ -n "$games" ]; then
+  say "within ${wait_host} s, eject ROCKNIX and GAMES when done."
+else
+  say "within ${wait_host} s, eject it when done."
+fi
 say "Then: ${ending}."
 
 waited=0
@@ -659,7 +691,8 @@ seen=no
 gone=0
 while :; do
   state=$(cat /sys/class/udc/$UDC/state 2>/dev/null)
-  file=$(cat $lun/file 2>/dev/null)
+  # Every disk's file: empty once the computer has ejected them all.
+  file=$(cat $G/functions/mass_storage.0/lun.*/file 2>/dev/null | tr -d '\n')
   if [ "$state" = configured ]; then
     [ $seen = no ] && say "Computer connected."
     seen=yes
