@@ -876,3 +876,7 @@ pin active low, and so does `lightos-r36s.dtsi` now.
 4. Overclocking: extra OPPs for CPU, GPU and DDR in the device tree, tested one
    step at a time. The DDR at 666 MHz works; the CPU at 1512 MHz and
    1.35 V does not boot.
+
+## License
+
+Copyright (C) 2026 Qasim Hussain. Lume is free software under the GNU General Public License, version 3 or (at your option) any later version: see [LICENSE](LICENSE). The kernel, Buildroot and the other projects it builds keep their own licenses.
